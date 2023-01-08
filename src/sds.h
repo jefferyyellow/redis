@@ -30,9 +30,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*动态的字符串库*/
+
 #ifndef __SDS_H
 #define __SDS_H
 
+// 1KB的大小
 #define SDS_MAX_PREALLOC (1024*1024)
 extern const char *SDS_NOINIT;
 
@@ -43,52 +46,84 @@ extern const char *SDS_NOINIT;
 typedef char *sds;
 
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
+// 注意：sdshdr5从没使用过，我们只是直接访问flags字节
  * However is here to document the layout of type 5 SDS strings. */
+// 不过这里有类型5 SDS字符串的布局文档
 struct __attribute__ ((__packed__)) sdshdr5 {
+    // 低3位为类型，高5位为字符串长度
     unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
+    // 存放实际字符串的地方
     char buf[];
 };
 struct __attribute__ ((__packed__)) sdshdr8 {
+    // 已经使用的长度
     uint8_t len; /* used */
+    // 分配的长度，除去头和null终止符
     uint8_t alloc; /* excluding the header and null terminator */
+    // 低3位为类型，高5位保留
     unsigned char flags; /* 3 lsb of type, 5 unused bits */
+    // 存放实际字符串的地方
     char buf[];
 };
 struct __attribute__ ((__packed__)) sdshdr16 {
+    // 已经使用的长度
     uint16_t len; /* used */
+    // 分配的长度，除去头和null终止符
     uint16_t alloc; /* excluding the header and null terminator */
+    // 低3位为类型，高5位保留
     unsigned char flags; /* 3 lsb of type, 5 unused bits */
+    // 存放实际字符串的地方
     char buf[];
 };
 struct __attribute__ ((__packed__)) sdshdr32 {
+    // 已经使用的长度
     uint32_t len; /* used */
+    // 分配的长度，除去头和null终止符
     uint32_t alloc; /* excluding the header and null terminator */
+    // 低3位为类型，高5位保留
     unsigned char flags; /* 3 lsb of type, 5 unused bits */
+    // 存放实际字符串的地方
     char buf[];
 };
 struct __attribute__ ((__packed__)) sdshdr64 {
+    // 已经使用的长度
     uint64_t len; /* used */
+    // 分配的长度，除去头和null终止符
     uint64_t alloc; /* excluding the header and null terminator */
+    // 低3位为类型，高5位保留
     unsigned char flags; /* 3 lsb of type, 5 unused bits */
+    // 存放实际字符串的地方
     char buf[];
 };
 
+// 简单动态字符串(SDS的五种类型)，
+// 分别对应sdshdr5，sdshdr8，sdshdr16，sdshdr32，sdshdr64
 #define SDS_TYPE_5  0
 #define SDS_TYPE_8  1
 #define SDS_TYPE_16 2
 #define SDS_TYPE_32 3
 #define SDS_TYPE_64 4
+// 取SDS类型的掩码（低三位的掩码)
+// 二进制：00000111
 #define SDS_TYPE_MASK 7
+// SDS类型占的位数
 #define SDS_TYPE_BITS 3
+// 从buff到对应的sds的具体类型的指针转换，就是从sdshdr*结构中的buf转换到sdshdr*结构
+// 然后赋值给一个变量
 #define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T)));
+// 与上一个作用相同，只是只做转换
 #define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T))))
+// sds类型5的长度,是通过flags的高5位得到的
 #define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
 
+// 获取sds的长度，这个s就是buff的地址
 static inline size_t sdslen(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
         case SDS_TYPE_5:
+        // 类型5的需要取flag的高5位，
             return SDS_TYPE_5_LEN(flags);
+        // 其他类型取结构中的len就行
         case SDS_TYPE_8:
             return SDS_HDR(8,s)->len;
         case SDS_TYPE_16:
@@ -101,12 +136,16 @@ static inline size_t sdslen(const sds s) {
     return 0;
 }
 
+// 得到可用空间的大小，这个s就是buff的地址
 static inline size_t sdsavail(const sds s) {
+    // s的前面1个char就是flags
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
+        //  SDS_TYPE_5是不预留空间的
         case SDS_TYPE_5: {
             return 0;
         }
+        // 其他类型的都是分配的减去已经用掉的
         case SDS_TYPE_8: {
             SDS_HDR_VAR(8,s);
             return sh->alloc - sh->len;
@@ -127,15 +166,19 @@ static inline size_t sdsavail(const sds s) {
     return 0;
 }
 
+// 设置新的已经使用的长度
 static inline void sdssetlen(sds s, size_t newlen) {
+    // s的前面1个char就是flags
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
+        // 类型5表示先得取得flag的地址，然后长度左移3位与类型或
         case SDS_TYPE_5:
             {
                 unsigned char *fp = ((unsigned char*)s)-1;
                 *fp = SDS_TYPE_5 | (newlen << SDS_TYPE_BITS);
             }
             break;
+        // 其他类型，直接设置len的值就行
         case SDS_TYPE_8:
             SDS_HDR(8,s)->len = newlen;
             break;
@@ -151,9 +194,12 @@ static inline void sdssetlen(sds s, size_t newlen) {
     }
 }
 
+// 增加已经使用的长度
 static inline void sdsinclen(sds s, size_t inc) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
+        // 类型5表示先得取得flag的地址，然后得到原来的长度和增加的长度之和，
+        // 然后新长度长度左移3位与类型或
         case SDS_TYPE_5:
             {
                 unsigned char *fp = ((unsigned char*)s)-1;
@@ -161,6 +207,7 @@ static inline void sdsinclen(sds s, size_t inc) {
                 *fp = SDS_TYPE_5 | (newlen << SDS_TYPE_BITS);
             }
             break;
+        // 其他类型，直接在len上面加值就行
         case SDS_TYPE_8:
             SDS_HDR(8,s)->len += inc;
             break;
@@ -177,11 +224,14 @@ static inline void sdsinclen(sds s, size_t inc) {
 }
 
 /* sdsalloc() = sdsavail() + sdslen() */
+// 得到分配的长度
 static inline size_t sdsalloc(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
+        // 类型5直接得到长度
         case SDS_TYPE_5:
             return SDS_TYPE_5_LEN(flags);
+        // 其他类型得到分配的长度
         case SDS_TYPE_8:
             return SDS_HDR(8,s)->alloc;
         case SDS_TYPE_16:
@@ -194,12 +244,15 @@ static inline size_t sdsalloc(const sds s) {
     return 0;
 }
 
+// 设置新的分配长度
 static inline void sdssetalloc(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
+        // 类型5没有总的分配长度，所以啥事都不用做
         case SDS_TYPE_5:
             /* Nothing to do, this type has no total allocation info. */
             break;
+        // 其他的类型直接设置分配长度就行
         case SDS_TYPE_8:
             SDS_HDR(8,s)->alloc = newlen;
             break;

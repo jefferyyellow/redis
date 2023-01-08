@@ -41,6 +41,7 @@
 
 const char *SDS_NOINIT = "SDS_NOINIT";
 
+// 得到各种类型头的尺寸
 static inline int sdsHdrSize(char type) {
     switch(type&SDS_TYPE_MASK) {
         case SDS_TYPE_5:
@@ -57,11 +58,15 @@ static inline int sdsHdrSize(char type) {
     return 0;
 }
 
+// 根据字符串的长度计算需要的类型
 static inline char sdsReqType(size_t string_size) {
+    // 如果字符串长度小于32，类型5
     if (string_size < 1<<5)
         return SDS_TYPE_5;
+    // 如果字符串长度小于256，类型8
     if (string_size < 1<<8)
         return SDS_TYPE_8;
+    // 如果字符串长度小于65536，类型16
     if (string_size < 1<<16)
         return SDS_TYPE_16;
 #if (LONG_MAX == LLONG_MAX)
@@ -73,17 +78,22 @@ static inline char sdsReqType(size_t string_size) {
 #endif
 }
 
+// 每种类型可以容纳的最大字符串长度
 static inline size_t sdsTypeMaxSize(char type) {
+    // 类型5的长度为31
     if (type == SDS_TYPE_5)
         return (1<<5) - 1;
+    // 类型8的长度为255
     if (type == SDS_TYPE_8)
         return (1<<8) - 1;
+    // 类型16的长度为65535
     if (type == SDS_TYPE_16)
         return (1<<16) - 1;
 #if (LONG_MAX == LLONG_MAX)
     if (type == SDS_TYPE_32)
         return (1ll<<32) - 1;
 #endif
+    // 使用最大的类型，如果定义了LLONG_MAX，就是SDS_TYPE_64，否则SDS_TYPE_32
     return -1; /* this is equivalent to the max SDS_TYPE_64 or SDS_TYPE_32 */
 }
 
@@ -100,6 +110,7 @@ static inline size_t sdsTypeMaxSize(char type) {
  * You can print the string with printf() as there is an implicit \0 at the
  * end of the string. However the string is binary safe and can contain
  * \0 characters in the middle, as the length is stored in the sds header. */
+// 使用init初始字符串和初始长度创建新的sds字符串
 sds _sdsnewlen(const void *init, size_t initlen, int trymalloc) {
     void *sh;
     sds s;
