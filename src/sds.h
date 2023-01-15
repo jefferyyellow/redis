@@ -267,12 +267,17 @@ static inline void sdssetalloc(sds s, size_t newlen) {
             break;
     }
 }
-
+// 创建新的简单字符串(SDS)
 sds sdsnewlen(const void *init, size_t initlen);
+// 尝试创建新的简单字符串（SDS）
 sds sdstrynewlen(const void *init, size_t initlen);
+// 从一个C字符串创建一个SDS字符串
 sds sdsnew(const char *init);
+// 创建一个空的（0长度）sds字符串
 sds sdsempty(void);
+// 复制一个SDS字符串
 sds sdsdup(const sds s);
+// 释放一个SDS字符串，
 void sdsfree(sds s);
 sds sdsgrowzero(sds s, size_t len);
 sds sdscatlen(sds s, const void *t, size_t len);
@@ -293,7 +298,9 @@ sds sdscatfmt(sds s, char const *fmt, ...);
 sds sdstrim(sds s, const char *cset);
 void sdssubstr(sds s, size_t start, size_t len);
 void sdsrange(sds s, ssize_t start, ssize_t end);
+// 通过strlen得到字符串的长度，然后更新到sds的长度
 void sdsupdatelen(sds s);
+// 就地修改sds字符串，使其成为空串
 void sdsclear(sds s);
 int sdscmp(const sds s1, const sds s2);
 sds *sdssplitlen(const char *s, ssize_t len, const char *sep, int seplen, int *count);
