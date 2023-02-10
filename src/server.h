@@ -498,8 +498,9 @@ typedef enum {
 
 /* Anti-warning macro... */
 #define UNUSED(V) ((void) V)
-
+// skip list的最大层数
 #define ZSKIPLIST_MAXLEVEL 32 /* Should be enough for 2^64 elements */
+// skip list计算层高的几率
 #define ZSKIPLIST_P 0.25      /* Skiplist P = 1/4 */
 
 /* Append only defines */
@@ -1280,19 +1281,35 @@ struct sharedObjectsStruct {
 };
 
 /* ZSETs use a specialized version of Skiplists */
+// ZSETs使用了一个特殊版本的SkipLists
 typedef struct zskiplistNode {
+    // 用于存储字符串类型的数据
     sds ele;
+    // 用于存储排序的分值
     double score;
+    // 后退指针，只能指向当前节点最底层的前一个节点，
+    // 头节点和第一个节点的backward指向NULL，从后向前遍历跳跃表时使用。
     struct zskiplistNode *backward;
+    // level为柔性数组。每个节点的数组长度不一样，
+    // 在生成跳跃表节点时，随机生成一个1～64的值，值越大出现的概率越低。
     struct zskiplistLevel {
+        // forward指向本层下一个节点，尾节点的forward指向NULL
         struct zskiplistNode *forward;
+        // forward指向的节点与本节点之间的元素个数。span值越大，跳过的节点个数越多。
         unsigned long span;
     } level[];
 } zskiplistNode;
 
 typedef struct zskiplist {
+    // header：指向跳跃表头节点。头节点是跳跃表的一个特殊节点，
+    // 它的level数组元素个数为64。头节点在有序集合中不存储任何member和score值，
+    // ele值为NULL，score值为0；也不计入跳跃表的总长度。头节点在初始化时，
+    // 64个元素的forward都指向NULL，span值都为0。
+    // tail：指向跳跃表尾节点
     struct zskiplistNode *header, *tail;
+    // 跳跃表长度，表示除头节点之外的节点总数。
     unsigned long length;
+    // 跳跃表的高度
     int level;
 } zskiplist;
 
@@ -2880,14 +2897,19 @@ sds genRedisInfoStringACLStats(sds info);
 #define ZADD_OUT_UPDATED (1<<3) /* The element already existed, score updated. */
 
 /* Struct to hold an inclusive/exclusive range spec by score comparison. */
+// 通过分数比较来保存包含/排除范围规格的结构
 typedef struct {
     double min, max;
+    // minex：是否不包含最小值，maxex：是否不包含最大值
     int minex, maxex; /* are min or max exclusive? */
 } zrangespec;
 
 /* Struct to hold an inclusive/exclusive range spec by lexicographic comparison. */
+// 通过词典比较来保存包含/排除范围规格的结构
 typedef struct {
+    // 可以设置为共享(minstring|maxstring)
     sds min, max;     /* May be set to shared.(minstring|maxstring) */
+    // minex：是否不包含最小值，maxex：是否不包含最大值
     int minex, maxex; /* are min or max exclusive? */
 } zlexrangespec;
 
