@@ -411,6 +411,8 @@ err:
  * Because of its strictness, it is safe to use this function to check if
  * you can convert a string into a long long, and obtain back the string
  * from the number without any loss in the string representation. */
+// 将一个字符串转换成long long整数。如果字符串可以解析成一个long long整数就返回1，或者返回0
+// value将被设置为解析后的合适的值。
 int string2ll(const char *s, size_t slen, long long *value) {
     const char *p = s;
     size_t plen = 0;
@@ -418,10 +420,13 @@ int string2ll(const char *s, size_t slen, long long *value) {
     unsigned long long v;
 
     /* A string of zero length or excessive length is not a valid number. */
+    // 如果字符串长度为0，或者超出了一个long long整数最大的长度(数值范围是19位，加上符号位是20位)
+    // -2^63 ( -9,223,372,036,854,775,808) 到2^63-1(+9,223,372,036,854,775,807)
     if (plen == slen || slen >= LONG_STR_SIZE)
         return 0;
 
     /* Special case: first and only digit is 0. */
+    // 特殊情况：0的解析
     if (slen == 1 && p[0] == '0') {
         if (value != NULL) *value = 0;
         return 1;
@@ -429,16 +434,19 @@ int string2ll(const char *s, size_t slen, long long *value) {
 
     /* Handle negative numbers: just set a flag and continue like if it
      * was a positive number. Later convert into negative. */
+    // 处理负数：只是设置了一个负数标志，后面的就像一个整数，后面将其转换位负数
     if (p[0] == '-') {
         negative = 1;
         p++; plen++;
 
         /* Abort on only a negative sign. */
+        // 只设置了一个负数符号，直接返回0
         if (plen == slen)
             return 0;
     }
 
     /* First digit should be 1-9, otherwise the string should just be 0. */
+    // 第一个数只能是1-9，否则返回0，就是不兼容0090这种数字
     if (p[0] >= '1' && p[0] <= '9') {
         v = p[0]-'0';
         p++; plen++;
@@ -447,11 +455,13 @@ int string2ll(const char *s, size_t slen, long long *value) {
     }
 
     /* Parse all the other digits, checking for overflow at every step. */
+    // 分析其他剩余的数字，每一步都需要检查是否溢出
     while (plen < slen && p[0] >= '0' && p[0] <= '9') {
+        // 检查进位溢出
         if (v > (ULLONG_MAX / 10)) /* Overflow. */
             return 0;
         v *= 10;
-
+        // 检查增加溢出
         if (v > (ULLONG_MAX - (p[0]-'0'))) /* Overflow. */
             return 0;
         v += p[0]-'0';
@@ -460,11 +470,13 @@ int string2ll(const char *s, size_t slen, long long *value) {
     }
 
     /* Return if not all bytes were used. */
+    // 如果不是所有的字符在0-9之间，返回0
     if (plen < slen)
         return 0;
 
     /* Convert to negative if needed, and do the final overflow check when
      * converting from unsigned long long to long long. */
+    // 转换为负数，注意要检查是否会溢出
     if (negative) {
         if (v > ((unsigned long long)(-(LLONG_MIN+1))+1)) /* Overflow. */
             return 0;

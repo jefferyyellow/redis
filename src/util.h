@@ -48,6 +48,8 @@
 #define MAX_D2STRING_CHARS 128
 
 /* Bytes needed for long -> str + '\0' */
+// -2^63 ( -9,223,372,036,854,775,808) 到2^63-1(+9,223,372,036,854,775,807)
+// 19个字节的数值范围，加上符号位，加上终止符，总共21位
 #define LONG_STR_SIZE      21
 
 /* long double to string conversion options */
