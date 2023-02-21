@@ -1400,7 +1400,7 @@ unsigned char *ziplistPush(unsigned char *zl, unsigned char *s, unsigned int sle
 /* Returns an offset to use for iterating with ziplistNext. When the given
  * index is negative, the list is traversed back to front. When the list
  * doesn't contain an element at the provided index, NULL is returned. */
-// 返回一个偏移用于ZiplistNext的遍历。当给定的索引为负数，列表从后到前遍历。
+// 返回一个用于ZiplistNext遍历的指定索引对应条目的偏移。当给定的索引为负数，列表从后到前遍历。
 // 如果列表不能包含一个指定索引的元素，返回NULL。
 unsigned char *ziplistIndex(unsigned char *zl, int index) {
     unsigned char *p;
@@ -1459,42 +1459,57 @@ unsigned char *ziplistIndex(unsigned char *zl, int index) {
  * p is the pointer to the current element
  *
  * The element after 'p' is returned, otherwise NULL if we are at the end. */
+// 返回压缩表中下一个条目的指针
+// z1是压缩表的指针
+// p是当前条目的指针
 unsigned char *ziplistNext(unsigned char *zl, unsigned char *p) {
     ((void) zl);
+    // 得到压缩包所有的字节数
     size_t zlbytes = intrev32ifbe(ZIPLIST_BYTES(zl));
 
     /* "p" could be equal to ZIP_END, caused by ziplistDelete,
      * and we should return NULL. Otherwise, we should return NULL
      * when the *next* element is ZIP_END (there is no next entry). */
+    // 当前的条目是否已经是末尾
     if (p[0] == ZIP_END) {
         return NULL;
     }
-
+    // 下一个条目的起始指针 = 当前条目的起始指针 + 当前条目占的字节数
     p += zipRawEntryLength(p);
+    // 下一个条目是末尾
     if (p[0] == ZIP_END) {
         return NULL;
     }
-
+    // 校验下一个条目指针的合法性（是否超出压缩表的整个范围）
     zipAssertValidEntry(zl, zlbytes, p);
     return p;
 }
 
 /* Return pointer to previous entry in ziplist. */
+// 返回压缩表中当前条目前一个条目的指针
 unsigned char *ziplistPrev(unsigned char *zl, unsigned char *p) {
     unsigned int prevlensize, prevlen = 0;
 
     /* Iterating backwards from ZIP_END should return the tail. When "p" is
      * equal to the first element of the list, we're already at the head,
      * and should return NULL. */
+    // 如果当前指针是末尾
     if (p[0] == ZIP_END) {
+        // 直接用压缩表头的信息得到最好一个条目
         p = ZIPLIST_ENTRY_TAIL(zl);
+        // 如果是空表，返回NULL，否则返回最后条目的指针
         return (p[0] == ZIP_END) ? NULL : p;
-    } else if (p == ZIPLIST_ENTRY_HEAD(zl)) {
+    } 
+    // 如果p的最开始条目的指针，压根就没有前一个条目，直接返回NULL
+    else if (p == ZIPLIST_ENTRY_HEAD(zl)) {
         return NULL;
     } else {
+        // 解码当前条目中保存的上一个条目的长度
         ZIP_DECODE_PREVLEN(p, prevlensize, prevlen);
         assert(prevlen > 0);
+        // 移动到上一个条目的开始处
         p-=prevlen;
+        // 校验上一个条目的指针合法性
         size_t zlbytes = intrev32ifbe(ZIPLIST_BYTES(zl));
         zipAssertValidEntry(zl, zlbytes, p);
         return p;
@@ -1505,18 +1520,25 @@ unsigned char *ziplistPrev(unsigned char *zl, unsigned char *p) {
  * on the encoding of the entry. '*sstr' is always set to NULL to be able
  * to find out whether the string pointer or the integer value was set.
  * Return 0 if 'p' points to the end of the ziplist, 1 otherwise. */
+// 获取p指向的条目，并根据条目的编码将内容存储在*sstr或sval中。 当sstr设置为NULL用于查明是否设置了字符串指针或整数值
+// 如果p指向ziplist的末尾则返回0，否则返回1。
 unsigned int ziplistGet(unsigned char *p, unsigned char **sstr, unsigned int *slen, long long *sval) {
     zlentry entry;
+    // 如果p为空或者指向末尾，直接返回0
     if (p == NULL || p[0] == ZIP_END) return 0;
+    // 如果sstr不为空，给它一个初值
     if (sstr) *sstr = NULL;
-
+    // 解析当前的条目
     zipEntry(p, &entry); /* no need for "safe" variant since the input pointer was validated by the function that returned it. */
+    // 如果编码是字符串，返回字符串的首地址和长度
     if (ZIP_IS_STR(entry.encoding)) {
         if (sstr) {
             *slen = entry.len;
             *sstr = p+entry.headersize;
         }
-    } else {
+    } 
+    // 如果编码是整数，返回整数的值
+    else {
         if (sval) {
             *sval = zipLoadInteger(p+entry.headersize,entry.encoding);
         }
@@ -1525,6 +1547,7 @@ unsigned int ziplistGet(unsigned char *p, unsigned char **sstr, unsigned int *sl
 }
 
 /* Insert an entry at "p". */
+// 在p处插入一个条目
 unsigned char *ziplistInsert(unsigned char *zl, unsigned char *p, unsigned char *s, unsigned int slen) {
     return __ziplistInsert(zl,p,s,slen);
 }
@@ -1532,29 +1555,38 @@ unsigned char *ziplistInsert(unsigned char *zl, unsigned char *p, unsigned char 
 /* Delete a single entry from the ziplist, pointed to by *p.
  * Also update *p in place, to be able to iterate over the
  * ziplist, while deleting entries. */
+// 从压缩表中删除一个p指向的简单条目。
+// 同时更新*p，以便能够遍历ziplist，同时删除条目
 unsigned char *ziplistDelete(unsigned char *zl, unsigned char **p) {
+    // 保存偏移
     size_t offset = *p-zl;
+    // 删除条目
     zl = __ziplistDelete(zl,*p,1);
 
     /* Store pointer to current element in p, because ziplistDelete will
      * do a realloc which might result in a different "zl"-pointer.
      * When the delete direction is back to front, we might delete the last
      * entry and end up with "p" pointing to ZIP_END, so check this. */
+    // 得到原偏移对应的新指针
     *p = zl+offset;
     return zl;
 }
 
 /* Delete a range of entries from the ziplist. */
+// 从压缩表中删除一个范围的条目
 unsigned char *ziplistDeleteRange(unsigned char *zl, int index, unsigned int num) {
+    // 得到索引开始的指针
     unsigned char *p = ziplistIndex(zl,index);
     return (p == NULL) ? zl : __ziplistDelete(zl,p,num);
 }
 
 /* Replaces the entry at p. This is equivalent to a delete and an insert,
  * but avoids some overhead when replacing a value of the same size. */
+// 替代p处的条目，这相当于删除然后插入，但在替换相同大小的值时避免了一些开销
 unsigned char *ziplistReplace(unsigned char *zl, unsigned char *p, unsigned char *s, unsigned int slen) {
 
     /* get metadata of the current entry */
+    // 解码当前条目
     zlentry entry;
     zipEntry(p, &entry);
 
@@ -1562,15 +1594,18 @@ unsigned char *ziplistReplace(unsigned char *zl, unsigned char *p, unsigned char
     unsigned int reqlen;
     unsigned char encoding = 0;
     long long value = 123456789; /* initialized to avoid warning. */
+    // 尝试将s指向的slen长度的数据编码为整数
     if (zipTryEncoding(s,slen,&value,&encoding)) {
         reqlen = zipIntSize(encoding); /* encoding is set */
     } else {
         reqlen = slen; /* encoding == 0 */
     }
+    // 得到编码/长度需要的字节数
     reqlen += zipStoreEntryEncoding(NULL,encoding,slen);
-
+    // 如果替换的条目和原条目的长度一致
     if (reqlen == entry.lensize + entry.len) {
         /* Simply overwrite the element. */
+        // 简单的覆盖条目
         p += entry.prevrawlensize;
         p += zipStoreEntryEncoding(p,encoding,slen);
         if (ZIP_IS_STR(encoding)) {
@@ -1578,7 +1613,9 @@ unsigned char *ziplistReplace(unsigned char *zl, unsigned char *p, unsigned char
         } else {
             zipSaveInteger(p,value,encoding);
         }
-    } else {
+    } 
+    // 长度不一致，就删除条目，重新插入
+    else {
         /* Fallback. */
         zl = ziplistDelete(zl,&p);
         zl = ziplistInsert(zl,p,s,slen);
@@ -1588,15 +1625,19 @@ unsigned char *ziplistReplace(unsigned char *zl, unsigned char *p, unsigned char
 
 /* Compare entry pointer to by 'p' with 'sstr' of length 'slen'. */
 /* Return 1 if equal. */
+// 比较p指向的条目和长度为slen的字符串sstr
+// 如果相等返回1
 unsigned int ziplistCompare(unsigned char *p, unsigned char *sstr, unsigned int slen) {
     zlentry entry;
     unsigned char sencoding;
     long long zval, sval;
     if (p[0] == ZIP_END) return 0;
-
+    // 解码当前条目
     zipEntry(p, &entry); /* no need for "safe" variant since the input pointer was validated by the function that returned it. */
+    // 字符串
     if (ZIP_IS_STR(entry.encoding)) {
         /* Raw compare */
+        // 长度相等的情况下比较内存
         if (entry.len == slen) {
             return memcmp(p+entry.headersize,sstr,slen) == 0;
         } else {
@@ -1605,7 +1646,9 @@ unsigned int ziplistCompare(unsigned char *p, unsigned char *sstr, unsigned int 
     } else {
         /* Try to compare encoded values. Don't compare encoding because
          * different implementations may encoded integers differently. */
+        // 尝试将传入的数据进行整数编码
         if (zipTryEncoding(sstr,slen,&sval,&sencoding)) {
+          // 得到整数值，然后比较
           zval = zipLoadInteger(p+entry.headersize,entry.encoding);
           return zval == sval;
         }
@@ -1615,22 +1658,28 @@ unsigned int ziplistCompare(unsigned char *p, unsigned char *sstr, unsigned int 
 
 /* Find pointer to the entry equal to the specified entry. Skip 'skip' entries
  * between every comparison. Returns NULL when the field could not be found. */
+// 找到等于指定条目的指针.skip表示每次比较之间跳过多少个条目。
+// 如果没用找到就返回NULL
 unsigned char *ziplistFind(unsigned char *zl, unsigned char *p, unsigned char *vstr, unsigned int vlen, unsigned int skip) {
     int skipcnt = 0;
     unsigned char vencoding = 0;
     long long vll = 0;
+    // 得到压缩表的总字节数
     size_t zlbytes = ziplistBlobLen(zl);
-
+    // 指针p还没有指向末尾
     while (p[0] != ZIP_END) {
         struct zlentry e;
         unsigned char *q;
-
+        // 解析条目
         assert(zipEntrySafe(zl, zlbytes, p, &e, 1));
         q = p + e.prevrawlensize + e.lensize;
-
+        // 如果跳过条目数为0，进行比较
         if (skipcnt == 0) {
             /* Compare current entry with specified entry */
+            // 比较当前的条目和指定条目
+            // 字符串编码
             if (ZIP_IS_STR(e.encoding)) {
+                // 比较长度和数据
                 if (e.len == vlen && memcmp(q, vstr, vlen) == 0) {
                     return p;
                 }
@@ -1638,11 +1687,13 @@ unsigned char *ziplistFind(unsigned char *zl, unsigned char *p, unsigned char *v
                 /* Find out if the searched field can be encoded. Note that
                  * we do it only the first time, once done vencoding is set
                  * to non-zero and vll is set to the integer value. */
+                // 如果从没解析过，解析指定的条目
                 if (vencoding == 0) {
                     if (!zipTryEncoding(vstr, vlen, &vll, &vencoding)) {
                         /* If the entry can't be encoded we set it to
                          * UCHAR_MAX so that we don't retry again the next
                          * time. */
+                        // 如果解析不成功，就设置成一个非法值
                         vencoding = UCHAR_MAX;
                     }
                     /* Must be non-zero by now */
@@ -1652,6 +1703,7 @@ unsigned char *ziplistFind(unsigned char *zl, unsigned char *p, unsigned char *v
                 /* Compare current entry with specified entry, do it only
                  * if vencoding != UCHAR_MAX because if there is no encoding
                  * possible for the field it can't be a valid integer. */
+                // 如果是合法的整数编码，解析成整数进行比较
                 if (vencoding != UCHAR_MAX) {
                     long long ll = zipLoadInteger(q, e.encoding);
                     if (ll == vll) {
@@ -1659,15 +1711,18 @@ unsigned char *ziplistFind(unsigned char *zl, unsigned char *p, unsigned char *v
                     }
                 }
             }
-
+            // 重置跳过条目计数
             /* Reset skip count */
             skipcnt = skip;
-        } else {
+        } 
+        // 如果跳过条目数计数不为0，减少计数
+        else {
             /* Skip entry */
             skipcnt--;
         }
 
         /* Move to next entry */
+        // 移动到下一个条目进行处理
         p = q + e.len;
     }
 
@@ -1675,29 +1730,37 @@ unsigned char *ziplistFind(unsigned char *zl, unsigned char *p, unsigned char *v
 }
 
 /* Return length of ziplist. */
+// 返回压缩表的条目数
 unsigned int ziplistLen(unsigned char *zl) {
     unsigned int len = 0;
+    // 如果条目数小于0xFFFF，那就是记录的正确的数据
     if (intrev16ifbe(ZIPLIST_LENGTH(zl)) < UINT16_MAX) {
         len = intrev16ifbe(ZIPLIST_LENGTH(zl));
-    } else {
+    } 
+    // 大于等于0xFFFF的条目，记录一直都是0xFFFF，需要遍历整个压缩表计算
+    else {
         unsigned char *p = zl+ZIPLIST_HEADER_SIZE;
         size_t zlbytes = intrev32ifbe(ZIPLIST_BYTES(zl));
+        // 遍历整个压缩表，数一数条目的数目
         while (*p != ZIP_END) {
             p += zipRawEntryLengthSafe(zl, zlbytes, p);
             len++;
         }
 
         /* Re-store length if small enough */
+        // 如果条目的数目小于0xFFFF，还需要回存
         if (len < UINT16_MAX) ZIPLIST_LENGTH(zl) = intrev16ifbe(len);
     }
     return len;
 }
 
 /* Return ziplist blob size in bytes. */
+// 返回压缩表的总字节数
 size_t ziplistBlobLen(unsigned char *zl) {
     return intrev32ifbe(ZIPLIST_BYTES(zl));
 }
 
+// 将一个压缩表格式化成一个可读的方式
 void ziplistRepr(unsigned char *zl) {
     unsigned char *p;
     int index = 0;
@@ -1760,25 +1823,30 @@ void ziplistRepr(unsigned char *zl) {
 /* Validate the integrity of the data structure.
  * when `deep` is 0, only the integrity of the header is validated.
  * when `deep` is 1, we scan all the entries one by one. */
+// 验证数据结构的完整性。 当deep为0时，仅验证标头的完整性。当deep为1时，我们逐一扫描所有条目。
 int ziplistValidateIntegrity(unsigned char *zl, size_t size, int deep,
     ziplistValidateEntryCB entry_cb, void *cb_userdata) {
     /* check that we can actually read the header. (and ZIP_END) */
+    // 确定我们是否可以读取头，不能比一个空压缩表的长度还小
     if (size < ZIPLIST_HEADER_SIZE + ZIPLIST_END_SIZE)
         return 0;
 
     /* check that the encoded size in the header must match the allocated size. */
+    // 得到压缩表的字节数，检验是否匹配
     size_t bytes = intrev32ifbe(ZIPLIST_BYTES(zl));
     if (bytes != size)
         return 0;
 
     /* the last byte must be the terminator. */
+    // 最后一个字节是否是末尾字节
     if (zl[size - ZIPLIST_END_SIZE] != ZIP_END)
         return 0;
 
     /* make sure the tail offset isn't reaching outside the allocation. */
+    // 确定最后一个条目是否超出的压缩表的范围
     if (intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl)) > size - ZIPLIST_END_SIZE)
         return 0;
-
+    // 如果不是深度校验，到此就返回了
     if (!deep)
         return 1;
 
@@ -1787,21 +1855,26 @@ int ziplistValidateIntegrity(unsigned char *zl, size_t size, int deep,
     unsigned char *p = ZIPLIST_ENTRY_HEAD(zl);
     unsigned char *prev = NULL;
     size_t prev_raw_size = 0;
+    // 循环遍历压缩表所有的条目，进行校验
     while(*p != ZIP_END) {
         struct zlentry e;
         /* Decode the entry headers and fail if invalid or reaches outside the allocation */
+        // 条目解析校验和是否会超出压缩表的范围
         if (!zipEntrySafe(zl, size, p, &e, 1))
             return 0;
 
         /* Make sure the record stating the prev entry size is correct. */
+        // 当前保存的前一个条目的字节数和前一个条目真实的字节数是否匹配
         if (e.prevrawlen != prev_raw_size)
             return 0;
 
         /* Optionally let the caller validate the entry too. */
+        // 选择性地让调用者也验证条目。
         if (entry_cb && !entry_cb(p, header_count, cb_userdata))
             return 0;
 
         /* Move to the next entry */
+        // 移动到下一条目
         prev_raw_size = e.headersize + e.len;
         prev = p;
         p += e.headersize + e.len;
@@ -1809,14 +1882,17 @@ int ziplistValidateIntegrity(unsigned char *zl, size_t size, int deep,
     }
 
     /* Make sure 'p' really does point to the end of the ziplist. */
+    // 确定p是否真的到了压缩表的最后一个字节
     if (p != zl + bytes - ZIPLIST_END_SIZE)
         return 0;
 
     /* Make sure the <zltail> entry really do point to the start of the last entry. */
+    // 确定当前的前一个条目是否是压缩表的最后一个条目
     if (prev != NULL && prev != ZIPLIST_ENTRY_TAIL(zl))
         return 0;
 
     /* Check that the count in the header is correct */
+    // 如果条目数没用超过UINT16_MAX，数值是否对的上
     if (header_count != UINT16_MAX && count != header_count)
         return 0;
 
@@ -1827,6 +1903,9 @@ int ziplistValidateIntegrity(unsigned char *zl, size_t size, int deep,
  * total_count is a pre-computed length/2 of the ziplist (to avoid calls to ziplistLen)
  * 'key' and 'val' are used to store the result key value pair.
  * 'val' can be NULL if the value is not needed. */
+// 随机选择一对键和值。 total_count是ziplist的长度/2（避免调用ziplistlen）
+// 键和val来存储结果键值对。 如果不需要值，则将val设置为null
+// 压缩表中保存的是多对key-value的数据，key-value-key-value-key-value的数据格式
 void ziplistRandomPair(unsigned char *zl, unsigned long total_count, ziplistEntry *key, ziplistEntry *val) {
     int ret;
     unsigned char *p;
@@ -1835,24 +1914,30 @@ void ziplistRandomPair(unsigned char *zl, unsigned long total_count, ziplistEntr
     assert(total_count);
 
     /* Generate even numbers, because ziplist saved K-V pair */
+    // 产生一个偶数的随机索引，因为压缩表保存键-值对
     int r = (rand() % total_count) * 2;
     p = ziplistIndex(zl, r);
+    // 得到指定索引的条目中的值
     ret = ziplistGet(p, &key->sval, &key->slen, &key->lval);
     assert(ret != 0);
 
     if (!val)
         return;
+    // 得到下一个条目，就是其value
     p = ziplistNext(zl, p);
+    // 得到value条目中的值
     ret = ziplistGet(p, &val->sval, &val->slen, &val->lval);
     assert(ret != 0);
 }
 
 /* int compare for qsort */
+// 用于快排的整数比较..........................
 int uintCompare(const void *a, const void *b) {
     return (*(unsigned int *) a - *(unsigned int *) b);
 }
 
 /* Helper method to store a string into from val or lval into dest */
+// 保存一个条目的值
 static inline void ziplistSaveValue(unsigned char *val, unsigned int len, long long lval, ziplistEntry *dest) {
     dest->sval = val;
     dest->slen = len;
@@ -1863,6 +1948,9 @@ static inline void ziplistSaveValue(unsigned char *val, unsigned int len, long l
  * 'vals' args. The order of the picked entries is random, and the selections
  * are non-unique (repetitions are possible).
  * The 'vals' arg can be NULL in which case we skip these. */
+// 随机选择钥匙值对的计数，然后将其存储到keys和vals的参数中。 
+// 挑选条目的顺序是随机的，选择是非唯一的（可能会出现重复）。
+// 如果vals参数为NULL，我们会跳过这些。
 void ziplistRandomPairs(unsigned char *zl, unsigned int count, ziplistEntry *keys, ziplistEntry *vals) {
     unsigned char *p, *key, *value;
     unsigned int klen = 0, vlen = 0;
@@ -1874,34 +1962,47 @@ void ziplistRandomPairs(unsigned char *zl, unsigned int count, ziplistEntry *key
         unsigned int order;
     } rand_pick;
     rand_pick *picks = zmalloc(sizeof(rand_pick)*count);
+    // 得到键值对的对数
     unsigned int total_size = ziplistLen(zl)/2;
 
     /* Avoid div by zero on corrupt ziplist */
     assert(total_size);
 
     /* create a pool of random indexes (some may be duplicate). */
+    // 创建一个池用于保存随机的索引（可能会有重复）
     for (unsigned int i = 0; i < count; i++) {
+        // 保存随机索引
         picks[i].index = (rand() % total_size) * 2; /* Generate even indexes */
         /* keep track of the order we picked them */
+        // 保存顺序
         picks[i].order = i;
     }
 
     /* sort by indexes. */
+    // 根据索引进行快速排序
     qsort(picks, count, sizeof(rand_pick), uintCompare);
 
     /* fetch the elements form the ziplist into a output array respecting the original order. */
+    // 根据压缩表的索引顺序将条目取出放入输出的队列中
     unsigned int zipindex = picks[0].index, pickindex = 0;
+    // 得到最前面的随机索引的指针
     p = ziplistIndex(zl, zipindex);
+    // 根据选择列表，先取出key的条目
     while (ziplistGet(p, &key, &klen, &klval) && pickindex < count) {
+        // 取出值的条目
         p = ziplistNext(zl, p);
         assert(ziplistGet(p, &value, &vlen, &vlval));
+        // 选择索引相等，就放入输出队列中
         while (pickindex < count && zipindex == picks[pickindex].index) {
+            // 得到排序之前的顺序
             int storeorder = picks[pickindex].order;
+            // 保存键和值的数据到输出列表中
             ziplistSaveValue(key, klen, klval, &keys[storeorder]);
             if (vals)
                 ziplistSaveValue(value, vlen, vlval, &vals[storeorder]);
              pickindex++;
         }
+        // 每次增加2的索引（键一个索引，值一个索引）
         zipindex += 2;
         p = ziplistNext(zl, p);
     }
@@ -1915,10 +2016,15 @@ void ziplistRandomPairs(unsigned char *zl, unsigned int count, ziplistEntry *key
  * The 'vals' arg can be NULL in which case we skip these.
  * The return value is the number of items picked which can be lower than the
  * requested count if the ziplist doesn't hold enough pairs. */
+// 随机选择钥匙值对的计数，然后将其存储到keys和vals的参数中。 
+// 挑选条目的顺序是随机的，选择是唯一的（不能重复）。并且所选条目的顺序不是随机的
+// 如果vals参数为NULL，我们会跳过这些。
+// 返回值是选择的条目数，如果压缩表中没有足够的键值对，那么它可能比要求的数目要少，
 unsigned int ziplistRandomPairsUnique(unsigned char *zl, unsigned int count, ziplistEntry *keys, ziplistEntry *vals) {
     unsigned char *p, *key;
     unsigned int klen = 0;
     long long klval = 0;
+    // 得到键值对的数目
     unsigned int total_size = ziplistLen(zl)/2;
     unsigned int index = 0;
     if (count > total_size)
@@ -1928,16 +2034,23 @@ unsigned int ziplistRandomPairsUnique(unsigned char *zl, unsigned int count, zip
      * we pick it is the quotient of the count left we want to pick and the
      * count still we haven't visited in the dict, this way, we could make every
      * member be equally picked.*/
+    // 从第0个索引开始
     p = ziplistIndex(zl, 0);
     unsigned int picked = 0, remaining = count;
     while (picked < count && p) {
+        // 得到随机数
         double randomDouble = ((double)rand()) / RAND_MAX;
+        // 计算阈值
         double threshold = ((double)remaining) / (total_size - index);
+        // 小于阈值就算选中
         if (randomDouble <= threshold) {
+            // 得到键的数据
             assert(ziplistGet(p, &key, &klen, &klval));
             ziplistSaveValue(key, klen, klval, &keys[picked]);
+            // 跳过键的条目
             p = ziplistNext(zl, p);
             assert(p);
+            // 保存值的数据
             if (vals) {
                 assert(ziplistGet(p, &key, &klen, &klval));
                 ziplistSaveValue(key, klen, klval, &vals[picked]);
@@ -1945,9 +2058,11 @@ unsigned int ziplistRandomPairsUnique(unsigned char *zl, unsigned int count, zip
             remaining--;
             picked++;
         } else {
+            // 如果没有选中，跳过键的条目
             p = ziplistNext(zl, p);
             assert(p);
         }
+        // 跳过值的条目
         p = ziplistNext(zl, p);
         index++;
     }
