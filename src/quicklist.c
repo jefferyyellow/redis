@@ -46,21 +46,29 @@
 /* Optimization levels for size-based filling.
  * Note that the largest possible limit is 64k, so even if each record takes
  * just one byte, it still won't overflow the 16 bit count field. */
+// 基于大小填充的优化等级
+// 注意：最大可能的限制是 64k，因此即使每条记录只占用一个字节，它仍然不会溢出16位计数的字段。
 static const size_t optimization_level[] = {4096, 8192, 16384, 32768, 65536};
 
 /* packed_threshold is initialized to 1gb*/
+// 打包的阈值初始化位1GB
 static size_t packed_threshold = (1 << 30);
 
 /* set threshold for PLAIN nodes, the real limit is 4gb */
+// 平台节点的阈值，真正的限制是4GB
 #define isLargeElement(size) ((size) >= packed_threshold)
 
 int quicklistisSetPackedThreshold(size_t sz) {
     /* Don't allow threshold to be set above or even slightly below 4GB */
+    // 不允许将阈值设置为高于或略低于4GB
     if (sz > (1ull<<32) - (1<<20)) {
         return 0;
-    } else if (sz == 0) { /* 0 means restore threshold */
+    } 
+    // 0意味着重置阈值，就是1GB
+    else if (sz == 0) { /* 0 means restore threshold */
         sz = (1 << 30);
     }
+    // 设置阈值
     packed_threshold = sz;
     return 1;
 }
@@ -70,20 +78,29 @@ int quicklistisSetPackedThreshold(size_t sz) {
  * This is used only if we're limited by record count. when we're limited by
  * size, the maximum limit is bigger, but still safe.
  * 8k is a recommended / default size limit */
+ // 任何多元素紧凑列表的最大大小（以字节为单位）。比这个还大的话将存在于它们自己的独立紧凑列表中。
+ // 仅当我们受记录数限制时才使用。 当我们受大小限制时，最大限制更大，但仍然安全。
+ // 8k是推荐/默认大小限制
 #define SIZE_SAFETY_LIMIT 8192
 
 /* Maximum estimate of the listpack entry overhead.
  * Although in the worst case(sz < 64), we will waste 6 bytes in one
  * quicklistNode, but can avoid memory waste due to internal fragmentation
  * when the listpack exceeds the size limit by a few bytes (e.g. being 16388). */
+// 紧凑列表条目开销的最大估计
+// 虽然在最坏的情况下（sz < 64)，我们需要在一个quicklistNode上浪费6个字节，
+// 但是可以避免当紧凑表超出尺寸限制几个字节（比如：16388）由于内部碎片而造成的内存浪费。
 #define SIZE_ESTIMATE_OVERHEAD 8
 
 /* Minimum listpack size in bytes for attempting compression. */
+// 尝试压缩的紧凑列表的最小尺寸
 #define MIN_COMPRESS_BYTES 48
 
 /* Minimum size reduction in bytes to store compressed quicklistNode data.
  * This also prevents us from storing compression if the compression
  * resulted in a larger size than the original data. */
+// 保存压缩的quicklistNode数据减少的最小尺寸。
+// 如果压缩后的尺寸比原数据的尺寸还大将会阻止我们保存压缩的数据
 #define MIN_COMPRESS_IMPROVE 8
 
 /* If not verbose testing, remove all debug printing. */
@@ -99,12 +116,14 @@ int quicklistisSetPackedThreshold(size_t sz) {
 #endif
 
 /* Bookmarks forward declarations */
+// 书签的前置声明
 #define QL_MAX_BM ((1 << QL_BM_BITS)-1)
 quicklistBookmark *_quicklistBookmarkFindByName(quicklist *ql, const char *name);
 quicklistBookmark *_quicklistBookmarkFindByNode(quicklist *ql, quicklistNode *node);
 void _quicklistBookmarkDelete(quicklist *ql, quicklistBookmark *bm);
 
 /* Simple way to give quicklistEntry structs default values with one call. */
+// 一个简单的方式给quicklistEntry结构体赋初值
 #define initEntry(e)                                                           \
     do {                                                                       \
         (e)->zi = (e)->value = NULL;                                           \
@@ -117,6 +136,7 @@ void _quicklistBookmarkDelete(quicklist *ql, quicklistBookmark *bm);
 
 /* Reset the quicklistIter to prevent it from being used again after
  * insert, replace, or other against quicklist operation. */
+// 在插入，替换或者其他相冲突的快速列表操作之后，为了防止重复使用，重置快速列表的迭代器。
 #define resetIterator(iter)                                                    \
     do {                                                                       \
         (iter)->current = NULL;                                                \
@@ -125,6 +145,7 @@ void _quicklistBookmarkDelete(quicklist *ql, quicklistBookmark *bm);
 
 /* Create a new quicklist.
  * Free with quicklistRelease(). */
+// 创建一个新的quicklist。使用quicklistRelease释放
 quicklist *quicklistCreate(void) {
     struct quicklist *quicklist;
 
@@ -139,7 +160,9 @@ quicklist *quicklistCreate(void) {
 }
 
 #define COMPRESS_MAX ((1 << QL_COMP_BITS)-1)
+// 设置快速列表的压缩深度（两端多少个节点不压缩）
 void quicklistSetCompressDepth(quicklist *quicklist, int compress) {
+    // 不能超过最大的压缩深度
     if (compress > COMPRESS_MAX) {
         compress = COMPRESS_MAX;
     } else if (compress < 0) {
@@ -149,27 +172,33 @@ void quicklistSetCompressDepth(quicklist *quicklist, int compress) {
 }
 
 #define FILL_MAX ((1 << (QL_FILL_BITS-1))-1)
+// 设置每个节点最大的数据项的数目
 void quicklistSetFill(quicklist *quicklist, int fill) {
     if (fill > FILL_MAX) {
         fill = FILL_MAX;
-    } else if (fill < -5) {
+    } 
+    // 最小不能小于-5，小于0的值是特殊含义
+    else if (fill < -5) {
         fill = -5;
     }
     quicklist->fill = fill;
 }
 
+// 设置快速列表的选项，设置节点的填充因子和压缩深度
 void quicklistSetOptions(quicklist *quicklist, int fill, int depth) {
     quicklistSetFill(quicklist, fill);
     quicklistSetCompressDepth(quicklist, depth);
 }
 
 /* Create a new quicklist with some default parameters. */
+// 创建一个新的快速列表，设置一些默认的参数
 quicklist *quicklistNew(int fill, int compress) {
     quicklist *quicklist = quicklistCreate();
     quicklistSetOptions(quicklist, fill, compress);
     return quicklist;
 }
 
+// 创建快速列表的节点，并赋初值
 REDIS_STATIC quicklistNode *quicklistCreateNode(void) {
     quicklistNode *node;
     node = zmalloc(sizeof(*node));
@@ -185,66 +214,85 @@ REDIS_STATIC quicklistNode *quicklistCreateNode(void) {
 }
 
 /* Return cached quicklist count */
+// 返回快速列表的数据项总数
 unsigned long quicklistCount(const quicklist *ql) { return ql->count; }
 
 /* Free entire quicklist. */
+// 释放整个快速列表
 void quicklistRelease(quicklist *quicklist) {
     unsigned long len;
     quicklistNode *current, *next;
 
     current = quicklist->head;
     len = quicklist->len;
+    // 遍历所有的节点
     while (len--) {
         next = current->next;
-
+        // 释放当前节点的数据条目
         zfree(current->entry);
         quicklist->count -= current->count;
-
+        // 释放当前节点本身
         zfree(current);
-
+        // 减少节点数目
         quicklist->len--;
+        // 进入下一个节点
         current = next;
     }
+    // 释放快速列表的书签
     quicklistBookmarksClear(quicklist);
+    // 释放快速列表本身 
     zfree(quicklist);
 }
 
 /* Compress the listpack in 'node' and update encoding details.
  * Returns 1 if listpack compressed successfully.
  * Returns 0 if compression failed or if listpack too small to compress. */
+// 压缩节点中的紧凑表并且更新编码细节。
+// 如果紧凑表压缩成功返回1，如果压缩失败或者紧凑表太小而不压缩返回0
 REDIS_STATIC int __quicklistCompressNode(quicklistNode *node) {
 #ifdef REDIS_TEST
     node->attempted_compress = 1;
 #endif
+    // 如果节点设置位不能压缩，直接返回0
     if (node->dont_compress) return 0;
 
     /* validate that the node is neither
      * tail nor head (it has prev and next)*/
+    // 确定当前节点不是头节点或者尾节点
     assert(node->prev && node->next);
 
+    // 将以前压缩过临时解压的标志去掉
     node->recompress = 0;
     /* Don't bother compressing small values */
+    // 如果节点的大小比最小的压缩阈值还小，就放弃
     if (node->sz < MIN_COMPRESS_BYTES)
         return 0;
 
+    // 为lzf压缩分配和原来一样的空间
     quicklistLZF *lzf = zmalloc(sizeof(*lzf) + node->sz);
 
     /* Cancel if compression fails or doesn't compress small enough */
+    // 如果压缩失败或者压缩后的尺寸不够小（不够MIN_COMPRESS_IMPROVE字节），就取消
     if (((lzf->sz = lzf_compress(node->entry, node->sz, lzf->compressed,
                                  node->sz)) == 0) ||
         lzf->sz + MIN_COMPRESS_IMPROVE >= node->sz) {
         /* lzf_compress aborts/rejects compression if value not compressible. */
+        // 释放为压缩分配的空间，然后返回0
         zfree(lzf);
         return 0;
     }
+    // 调整到实际大小
     lzf = zrealloc(lzf, sizeof(*lzf) + lzf->sz);
+    // 删除原来的紧凑表
     zfree(node->entry);
+    // 设置为lzf数据和编码
     node->entry = (unsigned char *)lzf;
     node->encoding = QUICKLIST_NODE_ENCODING_LZF;
     return 1;
 }
 
 /* Compress only uncompressed nodes. */
+// 只压缩目前还没有压缩的节点
 #define quicklistCompressNode(_node)                                           \
     do {                                                                       \
         if ((_node) && (_node)->encoding == QUICKLIST_NODE_ENCODING_RAW) {     \
@@ -254,26 +302,33 @@ REDIS_STATIC int __quicklistCompressNode(quicklistNode *node) {
 
 /* Uncompress the listpack in 'node' and update encoding details.
  * Returns 1 on successful decode, 0 on failure to decode. */
+// 解压“节点”中的紧凑表并更新编码细节。 解码成功返回1，解码失败返回0
 REDIS_STATIC int __quicklistDecompressNode(quicklistNode *node) {
 #ifdef REDIS_TEST
     node->attempted_compress = 0;
 #endif
+    // 将以前压缩过临时解压的标志去掉
     node->recompress = 0;
-
+    // 分配解压后的内存
     void *decompressed = zmalloc(node->sz);
     quicklistLZF *lzf = (quicklistLZF *)node->entry;
+    // 解压
     if (lzf_decompress(lzf->compressed, lzf->sz, decompressed, node->sz) == 0) {
         /* Someone requested decompress, but we can't decompress.  Not good. */
+        // 解压失败返回0
         zfree(decompressed);
         return 0;
     }
+    // 将压缩后的内存释放
     zfree(lzf);
+    // 更新为解压的紧凑表方式和编码类型
     node->entry = decompressed;
     node->encoding = QUICKLIST_NODE_ENCODING_RAW;
     return 1;
 }
 
 /* Decompress only compressed nodes. */
+// 只解压已经压缩了的节点
 #define quicklistDecompressNode(_node)                                         \
     do {                                                                       \
         if ((_node) && (_node)->encoding == QUICKLIST_NODE_ENCODING_LZF) {     \
@@ -282,6 +337,7 @@ REDIS_STATIC int __quicklistDecompressNode(quicklistNode *node) {
     } while (0)
 
 /* Force node to not be immediately re-compressible */
+// 强制节点不能立即重新压缩
 #define quicklistDecompressNodeForUse(_node)                                   \
     do {                                                                       \
         if ((_node) && (_node)->encoding == QUICKLIST_NODE_ENCODING_LZF) {     \
@@ -293,12 +349,14 @@ REDIS_STATIC int __quicklistDecompressNode(quicklistNode *node) {
 /* Extract the raw LZF data from this quicklistNode.
  * Pointer to LZF data is assigned to '*data'.
  * Return value is the length of compressed LZF data. */
+// 从quicklistNode中提取原始的LZF数据。*data指向LZF的数据，返回值是LZF的数据长度
 size_t quicklistGetLzf(const quicklistNode *node, void **data) {
     quicklistLZF *lzf = (quicklistLZF *)node->entry;
     *data = lzf->compressed;
     return lzf->sz;
 }
 
+// 快速列表是否允许压缩（就是压缩深度不为0）
 #define quicklistAllowsCompression(_ql) ((_ql)->compress != 0)
 
 /* Force 'quicklist' to meet compression guidelines set by compress depth.

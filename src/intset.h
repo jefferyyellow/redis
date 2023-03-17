@@ -32,9 +32,16 @@
 #define __INTSET_H
 #include <stdint.h>
 
+
+
+// 整数集合
+// 整数集合（intset）是一个有序的、存储整型数据的结构
 typedef struct intset {
+    // 编码类型
     uint32_t encoding;
+    // 元素数目
     uint32_t length;
+    // 可扩展数组，根据编码类型决定几个字节表示一个元素
     int8_t contents[];
 } intset;
 
