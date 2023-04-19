@@ -312,14 +312,25 @@ uint8_t LFULogIncr(uint8_t counter) {
  * And we will times halve the counter according to the times of
  * elapsed time than server.lfu_decay_time.
  * Return the object frequency counter.
- *
+ * 如果达到对象递减时间，则递减LFU计数器，但不更新对象的LFU字段，当真正访问对象时，
+ * 我们以显式方式更新访问时间和计数器。并且我们会根据所用时间比
+ * server.lfu_decay_time减半。返回对象频率计数器。
+ * 
  * This function is used in order to scan the dataset for the best object
  * to fit: as we check for the candidate, we incrementally decrement the
- * counter of the scanned objects if needed. */
+ * counter of the scanned objects if needed. 
+ * 此函数用于扫描数据集以找到最适合的对象：当我们检查候选对象时，
+ * 如果需要，我们会逐渐递减扫描对象的计数器。
+ * */
+// 范围衰减后的访问次数
 unsigned long LFUDecrAndReturn(robj *o) {
+    // 最近访问的时间
     unsigned long ldt = o->lru >> 8;
+    // 访问次数
     unsigned long counter = o->lru & 255;
+    // 根据衰减时间计算衰减的时间片
     unsigned long num_periods = server.lfu_decay_time ? LFUTimeElapsed(ldt) / server.lfu_decay_time : 0;
+    // 访问次数减去时间片数目
     if (num_periods)
         counter = (num_periods > counter) ? 0 : counter - num_periods;
     return counter;

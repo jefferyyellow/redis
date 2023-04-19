@@ -109,7 +109,7 @@ int activeExpireCycleTryExpire(redisDb *db, dictEntry *de, long long now) {
 #define ACTIVE_EXPIRE_CYCLE_SLOW_TIME_PERC 25 /* Max % of CPU to use. */
 #define ACTIVE_EXPIRE_CYCLE_ACCEPTABLE_STALE 10 /* % of stale keys after which
                                                    we do extra efforts. */
-
+// 删除过期的键
 void activeExpireCycle(int type) {
     /* Adjust the running parameters according to the configured expire
      * effort. The default effort is 1, and the maximum configurable effort
@@ -184,7 +184,7 @@ void activeExpireCycle(int type) {
 
     /* Try to smoke-out bugs (server.also_propagate should be empty here) */
     serverAssert(server.also_propagate.numops == 0);
-
+    // 最大遍历dbs_per_call个数据库
     for (j = 0; j < dbs_per_call && timelimit_exit == 0; j++) {
         /* Expired and checked in a single loop. */
         unsigned long expired, sampled;
@@ -294,6 +294,7 @@ void activeExpireCycle(int type) {
             /* We can't block forever here even if there are many keys to
              * expire. So after a given amount of milliseconds return to the
              * caller waiting for the other active expire cycle. */
+            // 没16次遍历检查一下时间，如果时间超过了，就终止
             if ((iteration & 0xf) == 0) { /* check once every 16 iterations. */
                 elapsed = ustime()-start;
                 if (elapsed > timelimit) {

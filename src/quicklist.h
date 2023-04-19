@@ -142,6 +142,7 @@ typedef struct quicklist {
     // 当fill为正数时，表明每个ziplist最多含有的数据项数，
     // 当fill为负数时: -1：Ziplist节点最大为4KB     -2：Ziplist节点最大为8KB
     // -3：Ziplist节点最大为16KB，-4：Ziplist节点最大为32KB，-5：Ziplist节点最大为64KB
+    // 默认为-2
     signed int fill : QL_FILL_BITS;       /* fill factor for individual nodes */
     // 压缩深度，就是ziplist两端各有多少个节点不压缩
     unsigned int compress : QL_COMP_BITS; /* depth of end nodes not to compress;0=off */
@@ -171,7 +172,7 @@ typedef struct quicklistEntry {
     const quicklist *quicklist;
     // 所在的快速列表节点
     quicklistNode *node;
-    // 所在的lis pack
+    // 所在的list pack的偏移
     unsigned char *zi;
     // 指向该节点的字符串内容
     unsigned char *value;
@@ -183,6 +184,7 @@ typedef struct quicklistEntry {
     int offset;
 } quicklistEntry;
 
+// 快速列表的头，尾
 #define QUICKLIST_HEAD 0
 #define QUICKLIST_TAIL -1
 
@@ -197,6 +199,7 @@ typedef struct quicklistEntry {
 
 /* quicklist node container formats */
 // 快速列表节点容器格式
+// 普通的，就是直接一块内存空间
 #define QUICKLIST_NODE_CONTAINER_PLAIN 1
 #define QUICKLIST_NODE_CONTAINER_PACKED 2
 

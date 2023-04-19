@@ -440,7 +440,8 @@ static int updateClientOutputBufferLimit(sds *args, int arg_len, const char **er
  * within conf file parsing. This is only needed to support the deprecated
  * abnormal aggregate `save T C` functionality. Remove in the future. */
 static int reading_config_file;
-
+// 注意：在这里支持检测一个从配置文件分析后的配置集合。
+// 这只需要支持不推荐使用的异常聚合“save T C”功能。因为该功能将来会删除。
 void loadServerConfigFromString(char *config) {
     deprecatedConfig deprecated_configs[] = {
         {"list-max-ziplist-entries", 2, 2},
@@ -454,19 +455,23 @@ void loadServerConfigFromString(char *config) {
     sds *lines;
 
     reading_config_file = 1;
+    // 将配置字符串通过换行符分割成行配置数组
     lines = sdssplitlen(config,strlen(config),"\n",1,&totlines);
-
+    // 遍历数组
     for (i = 0; i < totlines; i++) {
         sds *argv;
         int argc;
 
         linenum = i+1;
+        // 去掉tab和换行
         lines[i] = sdstrim(lines[i]," \t\r\n");
 
         /* Skip comments and blank lines */
+        // 跳过注释行和空白行
         if (lines[i][0] == '#' || lines[i][0] == '\0') continue;
 
         /* Split into arguments */
+        // 对行进行进一步分割成参数
         argv = sdssplitargs(lines[i],&argc);
         if (argv == NULL) {
             err = "Unbalanced quotes in configuration line";
@@ -474,26 +479,33 @@ void loadServerConfigFromString(char *config) {
         }
 
         /* Skip this line if the resulting command vector is empty. */
+        // 如果分割后的数组为空就略过
         if (argc == 0) {
             sdsfreesplitres(argv,argc);
             continue;
         }
+        // 转换为小写
         sdstolower(argv[0]);
 
         /* Iterate the configs that are standard */
+        // 查找对应的配置
         standardConfig *config = lookupConfig(argv[0]);
         if (config) {
             /* For normal single arg configs enforce we have a single argument.
              * Note that MULTI_ARG_CONFIGs need to validate arg count on their own */
+            // 配置和参数数目不匹配，设置错误信息
             if (!(config->flags & MULTI_ARG_CONFIG) && argc != 2) {
                 err = "wrong number of arguments";
                 goto loaderr;
             }
-
+            // 该配置接收多个参数，但是总共只有两个参数，第一个为配置名，第二个为真正的参数，
+            // 那就需要用空格将第二个参数在拆分成多个参数
             if ((config->flags & MULTI_ARG_CONFIG) && argc == 2 && sdslen(argv[1])) {
                 /* For MULTI_ARG_CONFIGs, if we only have one argument, try to split it by spaces.
                  * Only if the argument is not empty, otherwise something like --save "" will fail.
                  * So that we can support something like --config "arg1 arg2 arg3". */
+                // 对于MULTI_ARG_CONFIGs，如果我们只有一个参数，请尝试用空格将其拆分。只有当参数不为空时，
+                // 否则类似--save ""的操作才会失败。这样我们就可以支持--config "arg1 arg2 arg3"
                 sds *new_argv;
                 int new_argc;
                 new_argv = sdssplitargs(argv[1], &new_argc);
@@ -503,6 +515,7 @@ void loadServerConfigFromString(char *config) {
                 sdsfreesplitres(new_argv, new_argc);
             } else {
                 /* Set config using all arguments that follows */
+                // 使用后面跟着的所有参数来设置对应的配置
                 if (!config->interface.set(config, &argv[1], argc-1, &err)) {
                     goto loaderr;
                 }
@@ -510,9 +523,13 @@ void loadServerConfigFromString(char *config) {
 
             sdsfreesplitres(argv,argc);
             continue;
-        } else {
+        }
+        // 没找到对应的配置 
+        else {
             int match = 0;
+            // 是否在不在推荐的，过时的配置里
             for (deprecatedConfig *config = deprecated_configs; config->name != NULL; config++) {
+                // 比较是否匹配
                 if (!strcasecmp(argv[0], config->name) && 
                     config->argc_min <= argc && 
                     argc <= config->argc_max) 
@@ -521,6 +538,7 @@ void loadServerConfigFromString(char *config) {
                     break;
                 }
             }
+            // 如果匹配就略过
             if (match) {
                 sdsfreesplitres(argv,argc);
                 continue;
@@ -528,9 +546,19 @@ void loadServerConfigFromString(char *config) {
         }
 
         /* Execute config directives */
+        // 执行配置指令
+        // 如果是include指令, 解析Redis配置文件中include配置项的逻辑。如果argv[0]的值是"include"，且argc的值为2，
+        // 就调用loadServerConfig函数，读取指定文件名的配置文件并将其应用到Redis服务器中。
+        // 这样就可以在一个配置文件中嵌套其他的配置文件，从而更加方便地管理Redis服务器的配置。
         if (!strcasecmp(argv[0],"include") && argc == 2) {
+            // 加载对应的配置文件
             loadServerConfig(argv[1], 0, NULL);
-        } else if (!strcasecmp(argv[0],"rename-command") && argc == 3) {
+        } 
+        // 重命名命令,处理rename-command命令的逻辑，首先根据给定的命令名字（即argv[1]）查询出对应的redisCommand结构体指针，
+        // 如果没有找到则报错。然后判断目标命令名字（即argv[2]）是否为空，如果为空则删除原有命令，
+        // 否则将原有命令添加到新的命令名下（即argv[2]），如果新命令名字已经存在则报错。
+        else if (!strcasecmp(argv[0],"rename-command") && argc == 3) {
+            // 通过命令名字查找命令
             struct redisCommand *cmd = lookupCommandBySds(argv[1]);
             int retval;
 
@@ -541,21 +569,30 @@ void loadServerConfigFromString(char *config) {
 
             /* If the target command name is the empty string we just
              * remove it from the command table. */
+            // 如果目标命令名称是空字符串，我们只需将其从命令表中删除。
             retval = dictDelete(server.commands, argv[1]);
             serverAssert(retval == DICT_OK);
 
             /* Otherwise we re-add the command under a different name. */
+            // 参数不为空，表示
             if (sdslen(argv[2]) != 0) {
                 sds copy = sdsdup(argv[2]);
-
+                // 用新的名字重新加进去
                 retval = dictAdd(server.commands, copy, cmd);
                 if (retval != DICT_OK) {
                     sdsfree(copy);
                     err = "Target command name already exists"; goto loaderr;
                 }
             }
-        } else if (!strcasecmp(argv[0],"user") && argc >= 2) {
+        }
+        // 解析和加载Redis配置文件中的用户声明。如果配置文件中包含"user"字段且后面跟随至少两个参数，
+        // 那么将调用"ACLAppendUserForLoading"函数来处理这些参数。如果该函数返回C_ERR，则说明用户声明中有错误，
+        // 此时会通过"ACLSetUserStringError"函数获取错误信息，然后将错误信息和发生错误的参数位置组合成一个字符串，
+        // 最终将该字符串赋值给"err"变量并跳转到"loaderr"标签处。如果用户声明中的参数没有错误，则可以成功地加载该用户，
+        // 并将其添加到Redis的用户列表中
+        else if (!strcasecmp(argv[0],"user") && argc >= 2) {
             int argc_err;
+            // 增加用户的访问控制列表的规则和标志
             if (ACLAppendUserForLoading(argv,argc,&argc_err) == C_ERR) {
                 const char *errmsg = ACLSetUserStringError();
                 snprintf(buf,sizeof(buf),"Error in user declaration '%s': %s",
@@ -563,9 +600,20 @@ void loadServerConfigFromString(char *config) {
                 err = buf;
                 goto loaderr;
             }
-        } else if (!strcasecmp(argv[0],"loadmodule") && argc >= 2) {
+        } 
+        // Redis用于加载模块的命令处理逻辑。当用户执行loadmodule命令时，Redis会将指定的模块加入加载队列，
+        // 该队列会在后续的异步加载中被处理，直到所有的模块都被加载完成。其中，argv[1]是指定的模块路径，
+        // &argv[2]是传递给模块的参数列表，argc-2表示参数的数量
+        else if (!strcasecmp(argv[0],"loadmodule") && argc >= 2) {
+            // 放入模块加载列表中
             queueLoadModule(argv[1],&argv[2],argc-2);
-        } else if (strchr(argv[0], '.')) {
+        } 
+        // 模块配置列表，这段代码是处理Redis模块的配置选项，它允许在Redis启动时为模块传递配置选项，
+        // 类似于传递命令行参数一样。如果模块的名字中包含 .，那么就说明这个模块有配置选项需要设置。
+        // 此时会检查是否提供了对应的配置值，如果没有提供，就会报错。如果提供了对应的配置值，
+        // 则会将配置项的名字和值作为键值对存储到Redis的module_configs_queue字典中。
+        // 其中，键名为配置项的名字，键值为配置项的值。
+        else if (strchr(argv[0], '.')) {
             if (argc < 2) {
                 err = "Module config specified without value";
                 goto loaderr;
@@ -575,9 +623,14 @@ void loadServerConfigFromString(char *config) {
             for (int i = 2; i < argc; i++)
                 val = sdscatfmt(val, " %S", argv[i]);
             if (!dictReplace(server.module_configs_queue, name, val)) sdsfree(name);
-        } else if (!strcasecmp(argv[0],"sentinel")) {
+        } 
+        // 处理Redis配置文件中的sentinel指令。当argv[0]为sentinel时，如果argc为1，则表示需要立即进入Sentinel模式，
+        // 否则将argv[1]及其之后的参数作为配置信息添加到Sentinel的配置队列中。如果当前Redis不是Sentinel模式，
+        // 则无法使用该指令，会将错误信息存入err并跳转到loaderr标签处处理。
+        else if (!strcasecmp(argv[0],"sentinel")) {
             /* argc == 1 is handled by main() as we need to enter the sentinel
              * mode ASAP. */
+            // argc==1由main函数处理，因为我们需要尽快进入哨兵模式
             if (argc != 1) {
                 if (!server.sentinel_mode) {
                     err = "sentinel directive while not in sentinel mode";
@@ -590,36 +643,46 @@ void loadServerConfigFromString(char *config) {
         }
         sdsfreesplitres(argv,argc);
     }
-
+    // 检查是否可以成功打开Redis的日志文件
     if (server.logfile[0] != '\0') {
         FILE *logfp;
 
         /* Test if we are able to open the file. The server will not
          * be able to abort just for this problem later... */
+        // 如果日志文件路径(server.logfile)不为空字符串，代码会尝试以追加模式(“a”)打开该文件
         logfp = fopen(server.logfile,"a");
+        // 如果打开文件失败，则会设置一个错误信息(err)并跳转到错误处理流程(loaderr)。
         if (logfp == NULL) {
             err = sdscatprintf(sdsempty(),
                                "Can't open the log file: %s", strerror(errno));
             goto loaderr;
         }
+        // 如果打开文件成功，则会立即关闭文件。
         fclose(logfp);
     }
 
     /* Sanity checks. */
+    // 防止在集群模式下使用replicaof指令，因为在集群模式下Redis的主从复制机制是不同的。
     if (server.cluster_enabled && server.masterhost) {
         err = "replicaof directive not allowed in cluster mode";
         goto loaderr;
     }
 
     /* To ensure backward compatibility and work while hz is out of range */
+    // 检查服务器配置中的config_hz参数是否在Redis支持的最小和最大范围内。
+    // 如果该参数值小于Redis支持的最小值CONFIG_MIN_HZ，则将其设置为CONFIG_MIN_HZ；
+    // 如果该参数值大于Redis支持的最大值CONFIG_MAX_HZ，则将其设置为CONFIG_MAX_HZ。
+    // 这是为了确保Redis在不同的硬件环境下都能够正常运行。
     if (server.config_hz < CONFIG_MIN_HZ) server.config_hz = CONFIG_MIN_HZ;
     if (server.config_hz > CONFIG_MAX_HZ) server.config_hz = CONFIG_MAX_HZ;
 
     sdsfreesplitres(lines,totlines);
     reading_config_file = 0;
     return;
-
+    
+    // 在处理Redis的配置文件时，如果遇到错误，会输出错误信息并且退出程序。具体实现是通过goto语句跳转到loaderr标签处
 loaderr:
+    // 打印错误信息
     fprintf(stderr, "\n*** FATAL CONFIG FILE ERROR (Redis %s) ***\n",
         REDIS_VERSION);
     if (i < totlines) {
@@ -627,16 +690,22 @@ loaderr:
         fprintf(stderr, ">>> '%s'\n", lines[i]);
     }
     fprintf(stderr, "%s\n", err);
+    // 退出程序
     exit(1);
 }
 
 /* Load the server configuration from the specified filename.
  * The function appends the additional configuration directives stored
  * in the 'options' string to the config file before loading.
- *
+ * 从指定的文件名加载服务器的配置文件，函数在加载之前将存储在“options”字符串中的其他配置指令附加到配置文件中
+ * 
  * Both filename and options can be NULL, in such a case are considered
  * empty. This way loadServerConfig can be used to just load a file or
- * just load a string. */
+ * just load a string. 
+ * 文件名和选项都可以为NULL，这种情况下可以认为为空，这种方式
+ * loadServerConfig能够用于加载一个文件或者加载一个字符串
+ * 
+ * */
 #define CONFIG_READ_LEN 1024
 void loadServerConfig(char *filename, char config_from_stdin, char *options) {
     sds config = sdsempty();
@@ -645,6 +714,7 @@ void loadServerConfig(char *filename, char config_from_stdin, char *options) {
     glob_t globbuf;
 
     /* Load the file content */
+    // 加载文件内容
     if (filename) {
 
         /* The logic for handling wildcards has slightly different behavior in cases where
@@ -660,18 +730,21 @@ void loadServerConfig(char *filename, char config_from_stdin, char *options) {
          *                       pattern, then gracefully continue on to the next entry in the
          *                       config file, as if the current entry was never encountered.
          *                       This will allow for empty conf.d directories to be included. */
-
+        // 如果有通配符
         if (strchr(filename, '*') || strchr(filename, '?') || strchr(filename, '[')) {
             /* A wildcard character detected in filename, so let us use glob */
+            // 进行Glob模式匹配
             if (glob(filename, 0, NULL, &globbuf) == 0) {
-
+                // 打开匹配的各个配置文件
                 for (size_t i = 0; i < globbuf.gl_pathc; i++) {
                     if ((fp = fopen(globbuf.gl_pathv[i], "r")) == NULL) {
+                        // 读取失败写入日志，并且退出
                         serverLog(LL_WARNING,
                                   "Fatal error, can't open config file '%s': %s",
                                   globbuf.gl_pathv[i], strerror(errno));
                         exit(1);
                     }
+                    // 一行一行的读取，追加到config中去
                     while(fgets(buf,CONFIG_READ_LEN+1,fp) != NULL)
                         config = sdscat(config,buf);
                     fclose(fp);
@@ -682,12 +755,14 @@ void loadServerConfig(char *filename, char config_from_stdin, char *options) {
         } else {
             /* No wildcard in filename means we can use the original logic to read and
              * potentially fail traditionally */
+            // 打开对应的配置文件
             if ((fp = fopen(filename, "r")) == NULL) {
                 serverLog(LL_WARNING,
                           "Fatal error, can't open config file '%s': %s",
                           filename, strerror(errno));
                 exit(1);
             }
+            // 一行一行的读取，追加到config中去
             while(fgets(buf,CONFIG_READ_LEN+1,fp) != NULL)
                 config = sdscat(config,buf);
             fclose(fp);
@@ -695,6 +770,7 @@ void loadServerConfig(char *filename, char config_from_stdin, char *options) {
     }
 
     /* Append content from stdin */
+    // 从标准输入增加内容
     if (config_from_stdin) {
         serverLog(LL_WARNING,"Reading config from stdin");
         fp = stdin;
@@ -703,11 +779,14 @@ void loadServerConfig(char *filename, char config_from_stdin, char *options) {
     }
 
     /* Append the additional options */
+    // 增加额外的选项
     if (options) {
         config = sdscat(config,"\n");
         config = sdscat(config,options);
     }
+    // 从字符串加载服务器配置
     loadServerConfigFromString(config);
+    // 释放字符串
     sdsfree(config);
 }
 
@@ -3235,17 +3314,22 @@ int registerConfigValue(const char *name, const standardConfig *config, int alia
 
 /* Initialize configs to their default values and create and populate the 
  * runtime configuration dictionary. */
+// 将配置初始化为默认值，并创建和填充运行时配置字典
 void initConfigValues() {
+    // 创造字典并扩展到对应的长度
     configs = dictCreate(&sdsHashDictType);
     dictExpand(configs, sizeof(static_configs) / sizeof(standardConfig));
+    // 遍历静态配置表
     for (standardConfig *config = static_configs; config->name != NULL; config++) {
         if (config->interface.init) config->interface.init(config);
         /* Add the primary config to the dictionary. */
+        // 将配置加入到字典中去
         int ret = registerConfigValue(config->name, config, 0);
         serverAssert(ret);
 
         /* Aliases are the same as their primary counter parts, but they
          * also have a flag indicating they are the alias. */
+        // 别名和他主要的部分相似，但是它有一个标志标记它是别名
         if (config->alias) {
             int ret = registerConfigValue(config->alias, config, ALIAS_CONFIG);
             serverAssert(ret);

@@ -49,9 +49,11 @@ robj *createObject(int type, void *ptr) {
 
     /* Set the LRU to the current lruclock (minutes resolution), or
      * alternatively the LFU counter. */
+    // 如果是LFU，高16位存储的是对象的上次访问时间，以分钟为单位，低8位为初始访问次数
     if (server.maxmemory_policy & MAXMEMORY_FLAG_LFU) {
         o->lru = (LFUGetTimeInMinutes()<<8) | LFU_INIT_VAL;
     } else {
+        // lru为当前的访问时间
         o->lru = LRU_CLOCK();
     }
     return o;
@@ -384,8 +386,11 @@ void incrRefCount(robj *o) {
     }
 }
 
+// 减少引用计数
 void decrRefCount(robj *o) {
+    // 如果引用计数已经为1了
     if (o->refcount == 1) {
+        // 更加不同的obj类型进行释放
         switch(o->type) {
         case OBJ_STRING: freeStringObject(o); break;
         case OBJ_LIST: freeListObject(o); break;
@@ -396,9 +401,12 @@ void decrRefCount(robj *o) {
         case OBJ_STREAM: freeStreamObject(o); break;
         default: serverPanic("Unknown object type"); break;
         }
+        // 释放对象空间
         zfree(o);
     } else {
+        // 如果出现小于等于0的引用计数，抛出Panic
         if (o->refcount <= 0) serverPanic("decrRefCount against refcount <= 0");
+        // 如果不是从不销毁的obj，就减少引用计数
         if (o->refcount != OBJ_SHARED_REFCOUNT) o->refcount--;
     }
 }

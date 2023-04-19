@@ -363,15 +363,19 @@ size_t quicklistGetLzf(const quicklistNode *node, void **data) {
  * The only way to guarantee interior nodes get compressed is to iterate
  * to our "interior" compress depth then compress the next node we find.
  * If compress depth is larger than the entire list, we return immediately. */
+// 强制“快速列表”以满足压缩深度设置的压缩准则。保证内部节点被压缩的唯一方法是迭代到
+// 我们的“内部”压缩深度，然后压缩我们找到的下一个节点。如果压缩深度大于整个列表，我们会立即返回。
 REDIS_STATIC void __quicklistCompress(const quicklist *quicklist,
                                       quicklistNode *node) {
     if (quicklist->len == 0) return;
 
     /* The head and tail should never be compressed (we should not attempt to recompress them) */
+    // 头、尾节点从不应该被压缩
     assert(quicklist->head->recompress == 0 && quicklist->tail->recompress == 0);
 
     /* If length is less than our compress depth (from both sides),
      * we can't compress anything. */
+    // 如果压缩深度比整个长度还大，压根就不需要压缩
     if (!quicklistAllowsCompression(quicklist) ||
         quicklist->len < (unsigned int)(quicklist->compress * 2))
         return;
@@ -408,11 +412,15 @@ REDIS_STATIC void __quicklistCompress(const quicklist *quicklist,
     /* Iterate until we reach compress depth for both sides of the list.a
      * Note: because we do length checks at the *top* of this function,
      *       we can skip explicit null checks below. Everything exists. */
+    // 循环遍历直到列表两边的压缩深度
+    // 我们在该游戏的开头部分已经做了长度的校验，所以后面可以跳过明显的判空检查，一切都存在。
     quicklistNode *forward = quicklist->head;
     quicklistNode *reverse = quicklist->tail;
     int depth = 0;
     int in_depth = 0;
+    // 遍历深度
     while (depth++ < quicklist->compress) {
+        // 在深度范围内，解压节点
         quicklistDecompressNode(forward);
         quicklistDecompressNode(reverse);
 
@@ -421,6 +429,7 @@ REDIS_STATIC void __quicklistCompress(const quicklist *quicklist,
 
         /* We passed into compress depth of opposite side of the quicklist
          * so there's no need to compress anything and we can exit. */
+        // 从两边往中间走，已经走到了中间了
         if (forward == reverse || forward->next == reverse)
             return;
 
@@ -428,14 +437,17 @@ REDIS_STATIC void __quicklistCompress(const quicklist *quicklist,
         reverse = reverse->prev;
     }
 
+    // 传入的节点不在压缩深度范围内，压缩节点
     if (!in_depth)
         quicklistCompressNode(node);
 
     /* At this point, forward and reverse are one node beyond depth */
+    // 这时候，forward和reverse这两个节点都是深度之外了，压缩他们
     quicklistCompressNode(forward);
     quicklistCompressNode(reverse);
 }
 
+// 快速列表压缩节点
 #define quicklistCompress(_ql, _node)                                          \
     do {                                                                       \
         if ((_node)->recompress)                                               \
@@ -445,6 +457,7 @@ REDIS_STATIC void __quicklistCompress(const quicklist *quicklist,
     } while (0)
 
 /* If we previously used quicklistDecompressNodeForUse(), just recompress. */
+// 如果我们以前使用过quicklistDecompressNodeForUse（），只需重新压缩
 #define quicklistRecompressOnly(_node)                                         \
     do {                                                                       \
         if ((_node)->recompress)                                               \
@@ -455,10 +468,15 @@ REDIS_STATIC void __quicklistCompress(const quicklist *quicklist,
  * Insert 'new_node' before 'old_node' if 'after' is 0.
  * Note: 'new_node' is *always* uncompressed, so if we assign it to
  *       head or tail, we do not need to uncompress it. */
+// 如果after为1，表示在old_node的节点后面插入new_node
+// 如果after为0，表示在old_node的节点前面插入new_node
+// 注意：new_node总是非压缩的，如果放在头或者尾，不需要解压缩
 REDIS_STATIC void __quicklistInsertNode(quicklist *quicklist,
                                         quicklistNode *old_node,
                                         quicklistNode *new_node, int after) {
+    // 后面插入，
     if (after) {
+        // 插入双向链表
         new_node->prev = old_node;
         if (old_node) {
             new_node->next = old_node->next;
@@ -466,9 +484,11 @@ REDIS_STATIC void __quicklistInsertNode(quicklist *quicklist,
                 old_node->next->prev = new_node;
             old_node->next = new_node;
         }
+        // 如果老节点是尾结点，将新节点设置为尾节点
         if (quicklist->tail == old_node)
             quicklist->tail = new_node;
     } else {
+        // 插入双向链表
         new_node->next = old_node;
         if (old_node) {
             new_node->prev = old_node->prev;
@@ -476,17 +496,21 @@ REDIS_STATIC void __quicklistInsertNode(quicklist *quicklist,
                 old_node->prev->next = new_node;
             old_node->prev = new_node;
         }
+        // 如果老节点是头节点，将新节点设置为头节点
         if (quicklist->head == old_node)
             quicklist->head = new_node;
     }
     /* If this insert creates the only element so far, initialize head/tail. */
+    // 如果插入的节点是目前唯一的元素，那就是首尾节点都指向它
     if (quicklist->len == 0) {
         quicklist->head = quicklist->tail = new_node;
     }
 
     /* Update len first, so in __quicklistCompress we know exactly len */
+    // 增加节点数目
     quicklist->len++;
 
+    // 对新老节点根据压缩深度看情况进行压缩
     if (old_node)
         quicklistCompress(quicklist, old_node);
 
@@ -494,31 +518,37 @@ REDIS_STATIC void __quicklistInsertNode(quicklist *quicklist,
 }
 
 /* Wrappers for node inserting around existing node. */
+// 在old_node节点前插入new_node
 REDIS_STATIC void _quicklistInsertNodeBefore(quicklist *quicklist,
                                              quicklistNode *old_node,
                                              quicklistNode *new_node) {
     __quicklistInsertNode(quicklist, old_node, new_node, 0);
 }
 
+// 在old_node节点后插入new_node
 REDIS_STATIC void _quicklistInsertNodeAfter(quicklist *quicklist,
                                             quicklistNode *old_node,
                                             quicklistNode *new_node) {
     __quicklistInsertNode(quicklist, old_node, new_node, 1);
 }
 
+// 判断是否满足安全限制
 #define sizeMeetsSafetyLimit(sz) ((sz) <= SIZE_SAFETY_LIMIT)
 
 /* Calculate the size limit or length limit of the quicklist node
  * based on 'fill', and is also used to limit list listpack. */
+// 根据fill的值计算quicklist节点的尺寸限制和长度限制，也用于限制listpack
 void quicklistNodeLimit(int fill, size_t *size, unsigned int *count) {
     *size = SIZE_MAX;
     *count = UINT_MAX;
 
     if (fill >= 0) {
         /* Ensure that one node have at least one entry */
+        // 保证一个条目至少有一个节点
         *count = (fill == 0) ? 1 : fill;
     } else {
         size_t offset = (-fill) - 1;
+        // 根据fill得到对应的尺寸限制
         size_t max_level = sizeof(optimization_level) / sizeof(*optimization_level);
         if (offset >= max_level) offset = max_level - 1;
         *size = optimization_level[offset];
@@ -529,16 +559,22 @@ void quicklistNodeLimit(int fill, size_t *size, unsigned int *count) {
  * insertions, merges or other operations that would increase the size of
  * the node can be performed.
  * Return 1 if exceeds the limit, otherwise 0. */
+// 在插入、合并或者其他操作会引起节点的尺寸增加时，检查是否达到了quicklist的限制。
+// 如果超出了现在就返回1，否则返回0
 int quicklistNodeExceedsLimit(int fill, size_t new_sz, unsigned int new_count) {
     size_t sz_limit;
     unsigned int count_limit;
+    // 得到节点的限制
     quicklistNodeLimit(fill, &sz_limit, &count_limit);
-
+    // 如果尺寸不是非法值，那就比较尺寸是否超限
     if (likely(sz_limit != SIZE_MAX)) {
         return new_sz > sz_limit;
-    } else if (count_limit != UINT_MAX) {
+    } 
+    // 如果节点数不是非法制，毕竟节点数是否超限
+    else if (count_limit != UINT_MAX) {
         /* when we reach here we know that the limit is a size limit (which is
          * safe, see comments next to optimization_level and SIZE_SAFETY_LIMIT) */
+        // 尺寸不能超过安全尺寸
         if (!sizeMeetsSafetyLimit(new_sz)) return 1;
         return new_count > count_limit;
     }
@@ -546,11 +582,13 @@ int quicklistNodeExceedsLimit(int fill, size_t new_sz, unsigned int new_count) {
     redis_unreachable();
 }
 
+// 是否可以插入节点node
+// 不可以返回0，可以返回1
 REDIS_STATIC int _quicklistNodeAllowInsert(const quicklistNode *node,
                                            const int fill, const size_t sz) {
     if (unlikely(!node))
         return 0;
-
+    // 如果node为普通的或者节点本身过大，不能插入
     if (unlikely(QL_NODE_IS_PLAIN(node) || isLargeElement(sz)))
         return 0;
 
@@ -559,46 +597,58 @@ REDIS_STATIC int _quicklistNodeAllowInsert(const quicklistNode *node,
      * below the lowest limit of 4k (see optimization_level).
      * Note: No need to check for overflow below since both `node->sz` and
      * `sz` are to be less than 1GB after the plain/large element check above. */
+     // 估计此条目将向listpack中添加多少字节,我们更喜欢过高的估计，这会导致最坏的情况下小于最低限制4k减去
+     // 几个字节（参阅optimization_level）。注意：不需要检查下面的溢出，因为在上面的普通和大型元素检查
+     // 之后，“node->sz”和“sz”都将小于1GB
+     // 新的节点加入后的尺寸
     size_t new_sz = node->sz + sz + SIZE_ESTIMATE_OVERHEAD;
     if (unlikely(quicklistNodeExceedsLimit(fill, new_sz, node->count + 1)))
         return 0;
     return 1;
 }
 
+// 快速表的两个节点是否允许合并
 REDIS_STATIC int _quicklistNodeAllowMerge(const quicklistNode *a,
                                           const quicklistNode *b,
                                           const int fill) {
     if (!a || !b)
         return 0;
 
+    // a和b都是普通的，不能合并
     if (unlikely(QL_NODE_IS_PLAIN(a) || QL_NODE_IS_PLAIN(b)))
         return 0;
 
     /* approximate merged listpack size (- 7 to remove one listpack
      * header/trailer, see LP_HDR_SIZE and LP_EOF) */
+     // 计算合并后的尺寸
     unsigned int merge_sz = a->sz + b->sz - 7;
     if (unlikely(quicklistNodeExceedsLimit(fill, merge_sz, a->count + b->count)))
         return 0;
     return 1;
 }
 
+// 更新快速列表节点尺寸
 #define quicklistNodeUpdateSz(node)                                            \
     do {                                                                       \
         (node)->sz = lpBytes((node)->entry);                                   \
     } while (0)
 
+// 创建一个普通的快速列表节点，然后将传入的值初始化
 static quicklistNode* __quicklistCreatePlainNode(void *value, size_t sz) {
     quicklistNode *new_node = quicklistCreateNode();
     new_node->entry = zmalloc(sz);
     new_node->container = QUICKLIST_NODE_CONTAINER_PLAIN;
+    // 直接分配内存将数据拷贝进去
     memcpy(new_node->entry, value, sz);
     new_node->sz = sz;
     new_node->count++;
     return new_node;
 }
 
+// 快速列表插入普通节点
 static void __quicklistInsertPlainNode(quicklist *quicklist, quicklistNode *old_node,
                                        void *value, size_t sz, int after) {
+    // 先创建一个普通节点，然后初始化，在插入到快速列表中
     __quicklistInsertNode(quicklist, old_node, __quicklistCreatePlainNode(value, sz), after);
     quicklist->count++;
 }
@@ -607,25 +657,39 @@ static void __quicklistInsertPlainNode(quicklist *quicklist, quicklistNode *old_
  *
  * Returns 0 if used existing head.
  * Returns 1 if new head created. */
+// 给快速表的头节点增加一个条目
+// 如果使用已经存在的节点，返回0，
+// 如果创建了一个新的头结点，返回1，
 int quicklistPushHead(quicklist *quicklist, void *value, size_t sz) {
     quicklistNode *orig_head = quicklist->head;
 
+    // 如果数据尺寸符合一个大元素的尺寸
     if (unlikely(isLargeElement(sz))) {
+        // 创建一个普通节点，然后插在最前面
         __quicklistInsertPlainNode(quicklist, quicklist->head, value, sz, 0);
         return 1;
     }
 
+    // 如果头节点允许插入
     if (likely(
             _quicklistNodeAllowInsert(quicklist->head, quicklist->fill, sz))) {
+        // 加在listpack的前面
         quicklist->head->entry = lpPrepend(quicklist->head->entry, value, sz);
+        // 更新尺寸
         quicklistNodeUpdateSz(quicklist->head);
-    } else {
+    } 
+    // 头结点不允许插入
+    else {
+        // 创建一个新的节点
         quicklistNode *node = quicklistCreateNode();
+        // 附加到listpack前面
         node->entry = lpPrepend(lpNew(0), value, sz);
-
+        // 更新尺寸
         quicklistNodeUpdateSz(node);
+        // 插入到快速列表的最前面
         _quicklistInsertNodeBefore(quicklist, quicklist->head, node);
     }
+    // 快速列表和调节点的元素数目都增加
     quicklist->count++;
     quicklist->head->count++;
     return (orig_head != quicklist->head);
@@ -635,24 +699,32 @@ int quicklistPushHead(quicklist *quicklist, void *value, size_t sz) {
  *
  * Returns 0 if used existing tail.
  * Returns 1 if new tail created. */
+// 在快速列表的尾节点加入一个新的条目
 int quicklistPushTail(quicklist *quicklist, void *value, size_t sz) {
     quicklistNode *orig_tail = quicklist->tail;
+    // 如果数据尺寸符合一个大元素的尺寸
     if (unlikely(isLargeElement(sz))) {
+        // 创建一个普通节点，然后插在最后面
         __quicklistInsertPlainNode(quicklist, quicklist->tail, value, sz, 1);
         return 1;
     }
-
+    // 如果尾结点允许插入
     if (likely(
             _quicklistNodeAllowInsert(quicklist->tail, quicklist->fill, sz))) {
+        // 附加在节点后面
         quicklist->tail->entry = lpAppend(quicklist->tail->entry, value, sz);
         quicklistNodeUpdateSz(quicklist->tail);
     } else {
+        // 创建一个新的快速列表节点
         quicklistNode *node = quicklistCreateNode();
+        // 附加在lispack后面
         node->entry = lpAppend(lpNew(0), value, sz);
 
         quicklistNodeUpdateSz(node);
+        // 插入在尾结点后面
         _quicklistInsertNodeAfter(quicklist, quicklist->tail, node);
     }
+    // 快速列表元素数目加1,尾结点元素加1
     quicklist->count++;
     quicklist->tail->count++;
     return (orig_tail != quicklist->tail);
@@ -661,13 +733,16 @@ int quicklistPushTail(quicklist *quicklist, void *value, size_t sz) {
 /* Create new node consisting of a pre-formed listpack.
  * Used for loading RDBs where entire listpacks have been stored
  * to be retrieved later. */
+// 创建由预先形成的listpack组成的新节点。用于加载存储了整个listpacks以便以后检索的RDBs。
 void quicklistAppendListpack(quicklist *quicklist, unsigned char *zl) {
+    // 创建一个节点
     quicklistNode *node = quicklistCreateNode();
 
+    // 初始化节点
     node->entry = zl;
     node->count = lpLength(node->entry);
     node->sz = lpBytes(zl);
-
+    // 插入尾结点后面
     _quicklistInsertNodeAfter(quicklist, quicklist->tail, node);
     quicklist->count += node->count;
 }
@@ -676,18 +751,23 @@ void quicklistAppendListpack(quicklist *quicklist, unsigned char *zl) {
  * Used for loading RDBs where entire plain node has been stored
  * to be retrieved later.
  * data - the data to add (pointer becomes the responsibility of quicklist) */
+// 创建由预先形成的普通节点组成的新节点。用于加载RDB，其中存储了整个普通节点以便以后检索。
+// data-要添加的数据（指针成为quicklist的责任）*/
 void quicklistAppendPlainNode(quicklist *quicklist, unsigned char *data, size_t sz) {
+    // 创建节点
     quicklistNode *node = quicklistCreateNode();
-
+    // 初始化
     node->entry = data;
     node->count = 1;
     node->sz = sz;
     node->container = QUICKLIST_NODE_CONTAINER_PLAIN;
-
+    // 插入尾结点的后面
     _quicklistInsertNodeAfter(quicklist, quicklist->tail, node);
+    // 快速表元素数目增加
     quicklist->count += node->count;
 }
 
+// 如果节点的元素数目为0，删除节点
 #define quicklistDeleteIfEmpty(ql, n)                                          \
     do {                                                                       \
         if ((n)->count == 0) {                                                 \
@@ -696,38 +776,47 @@ void quicklistAppendPlainNode(quicklist *quicklist, unsigned char *data, size_t 
         }                                                                      \
     } while (0)
 
+// 快速列表删除节点
 REDIS_STATIC void __quicklistDelNode(quicklist *quicklist,
                                      quicklistNode *node) {
     /* Update the bookmark if any */
+    // 如果有书签，更新书签
     quicklistBookmark *bm = _quicklistBookmarkFindByNode(quicklist, node);
     if (bm) {
         bm->node = node->next;
         /* if the bookmark was to the last node, delete it. */
+        // 如果书签指向最后一个节点，请将其删除。
         if (!bm->node)
             _quicklistBookmarkDelete(quicklist, bm);
     }
 
+    // 从双向链表中删除
     if (node->next)
         node->next->prev = node->prev;
     if (node->prev)
         node->prev->next = node->next;
 
+    // 如果是尾结点，更新尾结点
     if (node == quicklist->tail) {
         quicklist->tail = node->prev;
     }
 
+    // 如果是头节点，更新头结点
     if (node == quicklist->head) {
         quicklist->head = node->next;
     }
 
     /* Update len first, so in __quicklistCompress we know exactly len */
+    // 更新节点数量和元素数量
     quicklist->len--;
     quicklist->count -= node->count;
 
     /* If we deleted a node within our compress depth, we
      * now have compressed nodes needing to be decompressed. */
+    //如果删除的节点是我们压缩深度里的，那么我们就有需要解压缩的压缩节点
     __quicklistCompress(quicklist, NULL);
 
+    // 删除数据和节点本身
     zfree(node->entry);
     zfree(node);
 }
@@ -740,24 +829,32 @@ REDIS_STATIC void __quicklistDelNode(quicklist *quicklist,
  *
  * Returns 1 if the entire node was deleted, 0 if node still exists.
  * Also updates in/out param 'p' with the next offset in the listpack. */
+ // 在给定条目的节点和指向节点内条目指针的情况下，删除一个条目。
+ // 注意：quicklistDelIndex要求没有压缩的节点，因为你必须已经从未压缩的节点某处得到p
+ // 如果整个节点都删除就返回1，如果节点还存在就返回0.也使用listpack的下一个偏移来更新输入输出参数p
 REDIS_STATIC int quicklistDelIndex(quicklist *quicklist, quicklistNode *node,
                                    unsigned char **p) {
     int gone = 0;
-
+    // 如果是一个普通节点，直接删除
     if (unlikely(QL_NODE_IS_PLAIN(node))) {
         __quicklistDelNode(quicklist, node);
         return 1;
     }
+    // 删除*p指向的节点
     node->entry = lpDelete(node->entry, *p, p);
     node->count--;
+    // 节点里的元素数目为0，直接将节点删除
     if (node->count == 0) {
         gone = 1;
         __quicklistDelNode(quicklist, node);
     } else {
+        // 更新尺寸
         quicklistNodeUpdateSz(node);
     }
+    // 减少数量
     quicklist->count--;
     /* If we deleted the node, the original node is no longer valid */
+    // 如果删除了节点，原始节点就不再有效
     return gone ? 1 : 0;
 }
 
@@ -765,21 +862,29 @@ REDIS_STATIC int quicklistDelIndex(quicklist *quicklist, quicklistNode *node,
  *
  * 'entry' stores enough metadata to delete the proper position in
  * the correct listpack in the correct quicklist node. */
+// 删除一个由“entry”表示的元素，“entry”存储了足够的元数据
+// 可以在正确的quicklist中和正确的listpack中的正确位置去删除条目
 void quicklistDelEntry(quicklistIter *iter, quicklistEntry *entry) {
     quicklistNode *prev = entry->node->prev;
     quicklistNode *next = entry->node->next;
+    // 删除对应的条目
     int deleted_node = quicklistDelIndex((quicklist *)entry->quicklist,
                                          entry->node, &entry->zi);
 
     /* after delete, the zi is now invalid for any future usage. */
+    // 删除了以后，迭代器中zi就不再有效
     iter->zi = NULL;
 
     /* If current node is deleted, we must update iterator node and offset. */
+    // 如果当前节点删除了，必须更新迭代中的节点和偏移
     if (deleted_node) {
+        // 迭代器的方向是从头往后
         if (iter->direction == AL_START_HEAD) {
             iter->current = next;
             iter->offset = 0;
-        } else if (iter->direction == AL_START_TAIL) {
+        } 
+        // 迭代器的方向是从后往头
+        else if (iter->direction == AL_START_TAIL) {
             iter->current = prev;
             iter->offset = -1;
         }
@@ -795,35 +900,51 @@ void quicklistDelEntry(quicklistIter *iter, quicklistEntry *entry) {
 }
 
 /* Replace quicklist entry by 'data' with length 'sz'. */
+// 用sz长度的数据data替代quicklist的条目
 void quicklistReplaceEntry(quicklistIter *iter, quicklistEntry *entry,
                            void *data, size_t sz)
 {
     quicklist* quicklist = iter->quicklist;
-
+    // 如果不是普通节点也不是大节点元素
     if (likely(!QL_NODE_IS_PLAIN(entry->node) && !isLargeElement(sz))) {
+        // listpack进行条目替代
         entry->node->entry = lpReplace(entry->node->entry, &entry->zi, data, sz);
+        // 更新大小
         quicklistNodeUpdateSz(entry->node);
         /* quicklistNext() and quicklistGetIteratorEntryAtIdx() provide an uncompressed node */
+        // 压缩节点
         quicklistCompress(quicklist, entry->node);
-    } else if (QL_NODE_IS_PLAIN(entry->node)) {
+    } 
+    // 普通节点
+    else if (QL_NODE_IS_PLAIN(entry->node)) {
+        // 大节点尺寸，删了重新分配
         if (isLargeElement(sz)) {
             zfree(entry->node->entry);
             entry->node->entry = zmalloc(sz);
             entry->node->sz = sz;
             memcpy(entry->node->entry, data, sz);
             quicklistCompress(quicklist, entry->node);
-        } else {
+        } 
+        // 普通节点替换就是插入新的，但是不能放在当前节点，所以插入后把当前节点删除
+        else {
+            // 直接在条目后面插入
             quicklistInsertAfter(iter, entry, data, sz);
+            // 然后把当前节点删除
             __quicklistDelNode(quicklist, entry->node);
         }
     } else {
+        // 设置不压缩
         entry->node->dont_compress = 1; /* Prevent compression in quicklistInsertAfter() */
+        // 插入在后面
         quicklistInsertAfter(iter, entry, data, sz);
+        // 插入在后面，但是元素的数目还是1，那就将原来的删除
         if (entry->node->count == 1) {
             __quicklistDelNode(quicklist, entry->node);
         } else {
             unsigned char *p = lpSeek(entry->node->entry, -1);
+            // 将条目删除
             quicklistDelIndex(quicklist, entry->node, &p);
+            // 开启压缩
             entry->node->dont_compress = 0; /* Re-enable compression */
             quicklistCompress(quicklist, entry->node);
             quicklistCompress(quicklist, entry->node->next);
@@ -832,6 +953,7 @@ void quicklistReplaceEntry(quicklistIter *iter, quicklistEntry *entry,
 
     /* In any case, we reset iterator to forbid use of iterator after insert.
      * Notice: iter->current has been compressed above. */
+    // 重置迭代器
     resetIterator(iter);
 }
 
@@ -839,12 +961,19 @@ void quicklistReplaceEntry(quicklistIter *iter, quicklistEntry *entry,
  *
  * Returns 1 if replace happened.
  * Returns 0 if replace failed and no changes happened. */
+// 使用长度为sz的数据data来替代quicklist中偏移为index的条目
+// 返回1表示发生了替换
+// 返回0表示替换失败或者没有变化产生。
 int quicklistReplaceAtIndex(quicklist *quicklist, long index, void *data,
                             size_t sz) {
     quicklistEntry entry;
+    // 得到偏移为index的条目
     quicklistIter *iter = quicklistGetIteratorEntryAtIdx(quicklist, index, &entry);
+    // 如果找到
     if (likely(iter)) {
+        // 替换条目的数据
         quicklistReplaceEntry(iter, &entry, data, sz);
+        // 释放迭代器
         quicklistReleaseIterator(iter);
         return 1;
     } else {
@@ -865,15 +994,19 @@ int quicklistReplaceAtIndex(quicklist *quicklist, long index, void *data,
  *
  * Returns the input node picked to merge against or NULL if
  * merging was not possible. */
+// 给定两个节点，尝试合并他们的listpacks
+// 如果我们的填充系数可以处理更高的层级，这可以帮助我们避免quicklist中只有3个元素的listpacks，
 REDIS_STATIC quicklistNode *_quicklistListpackMerge(quicklist *quicklist,
                                                     quicklistNode *a,
                                                     quicklistNode *b) {
     D("Requested merge (a,b) (%u, %u)", a->count, b->count);
-
+    // 解压节点a和b
     quicklistDecompressNode(a);
     quicklistDecompressNode(b);
+    // listpack合并
     if ((lpMerge(&a->entry, &b->entry))) {
         /* We merged listpacks! Now remove the unused quicklistNode. */
+        // 因为可以合并在两个节点的任意一个节点，需要将另外一个移除
         quicklistNode *keep = NULL, *nokeep = NULL;
         if (!a->entry) {
             nokeep = a;
@@ -882,11 +1015,14 @@ REDIS_STATIC quicklistNode *_quicklistListpackMerge(quicklist *quicklist,
             nokeep = b;
             keep = a;
         }
+        // 重新获取元素的数量
         keep->count = lpLength(keep->entry);
+        // 更新节点的尺寸
         quicklistNodeUpdateSz(keep);
-
+        // 删除没用的节点
         nokeep->count = 0;
         __quicklistDelNode(quicklist, nokeep);
+        // 压缩
         quicklistCompress(quicklist, keep);
         return keep;
     } else {
@@ -903,37 +1039,43 @@ REDIS_STATIC quicklistNode *_quicklistListpackMerge(quicklist *quicklist,
  *   - (center->prev, center)
  *   - (center, center->next)
  */
+// 尝试将center两侧的两个节点内的listpacks合并
 REDIS_STATIC void _quicklistMergeNodes(quicklist *quicklist,
                                        quicklistNode *center) {
     int fill = quicklist->fill;
     quicklistNode *prev, *prev_prev, *next, *next_next, *target;
     prev = prev_prev = next = next_next = target = NULL;
-
+    // 前一个节点存在
     if (center->prev) {
         prev = center->prev;
+        // 前前一个节点存在
         if (center->prev->prev)
             prev_prev = center->prev->prev;
     }
-
+    // 后一个节点存在
     if (center->next) {
         next = center->next;
+        // 后后一个节点存在
         if (center->next->next)
             next_next = center->next->next;
     }
 
     /* Try to merge prev_prev and prev */
+    // 尝试合并前一个节点和前前一个节点
     if (_quicklistNodeAllowMerge(prev, prev_prev, fill)) {
         _quicklistListpackMerge(quicklist, prev_prev, prev);
         prev_prev = prev = NULL; /* they could have moved, invalidate them. */
     }
 
     /* Try to merge next and next_next */
+    // 尝试合并后一个节点和后后一个节点
     if (_quicklistNodeAllowMerge(next, next_next, fill)) {
         _quicklistListpackMerge(quicklist, next, next_next);
         next = next_next = NULL; /* they could have moved, invalidate them. */
     }
 
     /* Try to merge center node and previous node */
+    // 尝试合并center节点和前一个节点
     if (_quicklistNodeAllowMerge(center, center->prev, fill)) {
         target = _quicklistListpackMerge(quicklist, center->prev, center);
         center = NULL; /* center could have been deleted, invalidate it. */
@@ -943,6 +1085,7 @@ REDIS_STATIC void _quicklistMergeNodes(quicklist *quicklist,
     }
 
     /* Use result of center merge (or original) to merge with next node. */
+    // 使用center节点合并的结果，和下一个节点合并
     if (_quicklistNodeAllowMerge(target, target->next, fill)) {
         _quicklistListpackMerge(quicklist, target, target->next);
     }
@@ -967,20 +1110,32 @@ REDIS_STATIC void _quicklistMergeNodes(quicklist *quicklist,
  * The input node keeps all elements not taken by the returned node.
  *
  * Returns newly created node or NULL if split not possible. */
+// 通过参数offset和after将node拆分成两部分
+// after参数控制那个quicklistNode返回
+// 如果after == 1，返回offset后面元素的节点，也就是[OFFSET+1, END]，
+//                 输入node保持着从开始一直到offset的元素，包含offset,也就是[0, OFFSET].
+// 如果after == 0, 返回从开始一直到offset节点的元素，也就是[0, OFFSET-1].
+//                 输入node保持着offset后面的元素，也就是 [OFFSET, END].
+// 输入的节点包含了返回节点以为的所有元素
+// 返回新创建的节点，如果不能拆分就返回NULL
 REDIS_STATIC quicklistNode *_quicklistSplitNode(quicklistNode *node, int offset,
                                                 int after) {
     size_t zl_sz = node->sz;
-
+    // 创建一个新的节点
     quicklistNode *new_node = quicklistCreateNode();
+    // 分配了同样大小的内存
     new_node->entry = zmalloc(zl_sz);
 
     /* Copy original listpack so we can split it */
+    // 将listpack的数据也拷贝进去
     memcpy(new_node->entry, node->entry, zl_sz);
 
     /* Need positive offset for calculating extent below. */
+    // 如果偏移为负数，需要转换为正数
     if (offset < 0) offset = node->count + offset;
 
     /* Ranges to be trimmed: -1 here means "continue deleting until the list ends" */
+    // 上面产生了2个一模一样的全的listpack，下面计算裁剪的范围,-1表示一直删到最后
     int orig_start = after ? offset + 1 : 0;
     int orig_extent = after ? -1 : offset;
     int new_start = after ? 0 : offset;
@@ -988,11 +1143,12 @@ REDIS_STATIC quicklistNode *_quicklistSplitNode(quicklistNode *node, int offset,
 
     D("After %d (%d); ranges: [%d, %d], [%d, %d]", after, offset, orig_start,
       orig_extent, new_start, new_extent);
-
+    // 删除当前节点对应的部分，更新元素数量和尺寸
     node->entry = lpDeleteRange(node->entry, orig_start, orig_extent);
     node->count = lpLength(node->entry);
     quicklistNodeUpdateSz(node);
 
+    // 删除新节点对应的部分，更新元素的数量和尺寸
     new_node->entry = lpDeleteRange(new_node->entry, new_start, new_extent);
     new_node->count = lpLength(new_node->entry);
     quicklistNodeUpdateSz(new_node);
@@ -1005,6 +1161,8 @@ REDIS_STATIC quicklistNode *_quicklistSplitNode(quicklistNode *node, int offset,
  *
  * If after==1, the new value is inserted after 'entry', otherwise
  * the new value is inserted before 'entry'. */
+// 在已经存在的条目前面或者后面插入一个新的条目
+// 如果after==1,新的值插入到entry得后面，否则新的值插入到entry的前面
 REDIS_STATIC void _quicklistInsert(quicklistIter *iter, quicklistEntry *entry,
                                    void *value, const size_t sz, int after)
 {
@@ -1014,37 +1172,44 @@ REDIS_STATIC void _quicklistInsert(quicklistIter *iter, quicklistEntry *entry,
     quicklistNode *node = entry->node;
     quicklistNode *new_node = NULL;
 
+    // 没有引用的节点
     if (!node) {
         /* we have no reference node, so let's create only node in the list */
         D("No node given!");
+        // 如果是大尺寸元素，创建一个普通节点插入到快速列表
         if (unlikely(isLargeElement(sz))) {
             __quicklistInsertPlainNode(quicklist, quicklist->tail, value, sz, after);
             return;
         }
+        // 创建列表，然后插入到列表中
         new_node = quicklistCreateNode();
         new_node->entry = lpPrepend(lpNew(0), value, sz);
         __quicklistInsertNode(quicklist, NULL, new_node, after);
+        // 增加元素数量
         new_node->count++;
         quicklist->count++;
         return;
     }
 
     /* Populate accounting flags for easier boolean checks later */
+    // 检查该节点是否允许插入
     if (!_quicklistNodeAllowInsert(node, fill, sz)) {
         D("Current node is full with count %d with requested fill %d",
           node->count, fill);
         full = 1;
     }
-
+    // 如果是插在后面，并且原条目是最后的条目
     if (after && (entry->offset == node->count - 1 || entry->offset == -1)) {
         D("At Tail of current listpack");
         at_tail = 1;
+        // 后面的节点存在，并且可以插入
         if (_quicklistNodeAllowInsert(node->next, fill, sz)) {
             D("Next node is available.");
             avail_next = 1;
         }
     }
 
+    // 如果插在前面，且条目为最前面的条目
     if (!after && (entry->offset == 0 || entry->offset == -(node->count))) {
         D("At Head");
         at_head = 1;
@@ -1053,13 +1218,17 @@ REDIS_STATIC void _quicklistInsert(quicklistIter *iter, quicklistEntry *entry,
             avail_prev = 1;
         }
     }
-
+    // 如果是大尺寸节点
     if (unlikely(isLargeElement(sz))) {
+        // 如果是普通节点，或者在末尾条目后面插入，或者在首条目前面插入，插入一个新的节点
         if (QL_NODE_IS_PLAIN(node) || (at_tail && after) || (at_head && !after)) {
             __quicklistInsertPlainNode(quicklist, node, value, sz, after);
         } else {
+            // 解压节点
             quicklistDecompressNodeForUse(node);
+            // 将节点拆分成两个节点
             new_node = _quicklistSplitNode(node, entry->offset, after);
+            // 连接节点
             quicklistNode *entry_node = __quicklistCreatePlainNode(value, sz);
             __quicklistInsertNode(quicklist, node, entry_node, after);
             __quicklistInsertNode(quicklist, entry_node, new_node, after);
@@ -1069,81 +1238,113 @@ REDIS_STATIC void _quicklistInsert(quicklistIter *iter, quicklistEntry *entry,
     }
 
     /* Now determine where and how to insert the new element */
+    // 现在决定在那里怎么样插入新的元素
     if (!full && after) {
         D("Not full, inserting after current position.");
+        // 解压
         quicklistDecompressNodeForUse(node);
+        // 插入条目
         node->entry = lpInsertString(node->entry, value, sz, entry->zi, LP_AFTER, NULL);
+        // 更新条目数，节点尺寸
         node->count++;
         quicklistNodeUpdateSz(node);
+        // 重新压缩
         quicklistRecompressOnly(node);
     } else if (!full && !after) {
         D("Not full, inserting before current position.");
+        // 解压
         quicklistDecompressNodeForUse(node);
+        // 插入条码并且更新条目数和尺寸
         node->entry = lpInsertString(node->entry, value, sz, entry->zi, LP_BEFORE, NULL);
         node->count++;
         quicklistNodeUpdateSz(node);
+        // 重新解压
         quicklistRecompressOnly(node);
-    } else if (full && at_tail && avail_next && after) {
+    } 
+    // 当前节点满了，并且条目在最后，并且在后面插入，有下一个节点，
+    else if (full && at_tail && avail_next && after) {
         /* If we are: at tail, next has free space, and inserting after:
          *   - insert entry at head of next node. */
         D("Full and tail, but next isn't full; inserting next node head");
+        // 在该节点的最后条目的后面插入，但是该节点已经满了，后面一个节点还有空闲位置
+        // 那就插入在下一个节点的开始条目之前
         new_node = node->next;
+        // 解压
         quicklistDecompressNodeForUse(new_node);
+        // 在下一个节点的开始条目之前插入
         new_node->entry = lpPrepend(new_node->entry, value, sz);
         new_node->count++;
+        // 更新尺寸和重新压缩
         quicklistNodeUpdateSz(new_node);
         quicklistRecompressOnly(new_node);
         quicklistRecompressOnly(node);
-    } else if (full && at_head && avail_prev && !after) {
+    } 
+    // 当前节点满了，并且条目在开始处，插入在开始条目之前，并且还有前一个节点
+    else if (full && at_head && avail_prev && !after) {
         /* If we are: at head, previous has free space, and inserting before:
          *   - insert entry at tail of previous node. */
         D("Full and head, but prev isn't full, inserting prev node tail");
+        // 在该节点的最开始的条目前面插入，但是该节点已经满了，前面一个节点还有空闲位置
+        // 那就插入在前一个节点的末尾条目之后
         new_node = node->prev;
         quicklistDecompressNodeForUse(new_node);
+        // 插入在前一个节点的末尾条目之后
         new_node->entry = lpAppend(new_node->entry, value, sz);
         new_node->count++;
+        // 更新尺寸然后重新压缩
         quicklistNodeUpdateSz(new_node);
         quicklistRecompressOnly(new_node);
         quicklistRecompressOnly(node);
-    } else if (full && ((at_tail && !avail_next && after) ||
+    } 
+    // 当前节点满了，插入末尾条目之后，后续节点不能插入
+    // 当前节点满了，插入开始条目之前，前面的节点不能插入，
+    else if (full && ((at_tail && !avail_next && after) ||
                         (at_head && !avail_prev && !after))) {
         /* If we are: full, and our prev/next has no available space, then:
          *   - create new node and attach to quicklist */
+        // 创建新的节点，挂接在当前节点之后
         D("\tprovisioning new node...");
         new_node = quicklistCreateNode();
+        // 传入的值为当前节点的条目
         new_node->entry = lpPrepend(lpNew(0), value, sz);
         new_node->count++;
+        // 更新尺寸
         quicklistNodeUpdateSz(new_node);
+        // 插入列表
         __quicklistInsertNode(quicklist, node, new_node, after);
     } else if (full) {
         /* else, node is full we need to split it. */
         /* covers both after and !after cases */
+        // 节点满了，需要拆分
         D("\tsplitting node...");
         quicklistDecompressNodeForUse(node);
+        // 拆分成两个节点
         new_node = _quicklistSplitNode(node, entry->offset, after);
+        // 在条目后或者前插入
         if (after)
             new_node->entry = lpPrepend(new_node->entry, value, sz);
         else
             new_node->entry = lpAppend(new_node->entry, value, sz);
         new_node->count++;
         quicklistNodeUpdateSz(new_node);
+        // 节点插入到快速列表中
         __quicklistInsertNode(quicklist, node, new_node, after);
         _quicklistMergeNodes(quicklist, node);
     }
-
+    // 快速列表元素增加
     quicklist->count++;
 
     /* In any case, we reset iterator to forbid use of iterator after insert.
      * Notice: iter->current has been compressed in _quicklistInsert(). */
     resetIterator(iter); 
 }
-
+// 在条目entry的前面插入一个条目
 void quicklistInsertBefore(quicklistIter *iter, quicklistEntry *entry,
                            void *value, const size_t sz)
 {
     _quicklistInsert(iter, entry, value, sz, 0);
 }
-
+// 在条目entry的后面插入一个条目
 void quicklistInsertAfter(quicklistIter *iter, quicklistEntry *entry,
                           void *value, const size_t sz)
 {
@@ -1156,13 +1357,16 @@ void quicklistInsertAfter(quicklistIter *iter, quicklistEntry *entry,
  * have to be careful about tracking where we start and end.
  *
  * Returns 1 if entries were deleted, 0 if nothing was deleted. */
+// 从quicklist中删除一个范围的元素
+// 元素可能会跨越多个quicklistNodes，所以我们需要注意它们从哪开始到哪结束
+// 如果条目已经删除返回1，如果没东西删除返回0
 int quicklistDelRange(quicklist *quicklist, const long start,
                       const long count) {
     if (count <= 0)
         return 0;
 
     unsigned long extent = count; /* range is inclusive of start position */
-
+    // 如果count超出了，需要限制大小
     if (start >= 0 && extent > (quicklist->count - start)) {
         /* if requesting delete more elements than exist, limit to list size. */
         extent = quicklist->count - start;
@@ -1171,28 +1375,35 @@ int quicklistDelRange(quicklist *quicklist, const long start,
         extent = -start; /* c.f. LREM -29 29; just delete until end. */
     }
 
+    // 得到索引对应的迭代器
     quicklistIter *iter = quicklistGetIteratorAtIdx(quicklist, AL_START_TAIL, start);
     if (!iter)
         return 0;
 
     D("Quicklist delete request for start %ld, count %ld, extent: %ld", start,
       count, extent);
+    // 从迭代器里面取出当前节点和偏移，然后释放迭代器
     quicklistNode *node = iter->current;
     long offset = iter->offset;
     quicklistReleaseIterator(iter);
 
     /* iterate over next nodes until everything is deleted. */
+    // 遍历节点直到一切都删除掉
     while (extent) {
         quicklistNode *next = node->next;
 
         unsigned long del;
         int delete_entire_node = 0;
+        // 如果从头开始删除，并且剩余的要删除的元素数目大于整个节点的元素数目,
+        // 那就删除整个节点
         if (offset == 0 && extent >= node->count) {
             /* If we are deleting more than the count of this node, we
              * can just delete the entire node without listpack math. */
             delete_entire_node = 1;
             del = node->count;
-        } else if (offset >= 0 && extent + offset >= node->count) {
+        } 
+        // 如果在此节点之后删除更多节点，则根据当前节点的大小计算删除。
+        else if (offset >= 0 && extent + offset >= node->count) {
             /* If deleting more nodes after this one, calculate delete based
              * on size of current node. */
             del = node->count - offset;
@@ -1202,6 +1413,7 @@ int quicklistDelRange(quicklist *quicklist, const long start,
              * from this start offset to end of list.  Since the Negative
              * offset is the number of elements until the tail of the list,
              * just use it directly as the deletion count. */
+            // 计算删除的数量，如果数量超过剩余数量，也只删除剩余数量
             del = -offset;
 
             /* If the positive offset is greater than the remaining extent,
@@ -1212,6 +1424,7 @@ int quicklistDelRange(quicklist *quicklist, const long start,
         } else {
             /* else, we are deleting less than the extent of this node, so
              * use extent directly. */
+            // 删除剩余的数量
             del = extent;
         }
 
@@ -1219,21 +1432,26 @@ int quicklistDelRange(quicklist *quicklist, const long start,
           "node count: %u",
           extent, del, offset, delete_entire_node, node->count);
 
+        // 如果需要删除整个节点，或者是普通节点，就直接将节点删除
         if (delete_entire_node || QL_NODE_IS_PLAIN(node)) {
             __quicklistDelNode(quicklist, node);
         } else {
+            // 解压节点
             quicklistDecompressNodeForUse(node);
+            // 删除从偏移处开始的del个元素
             node->entry = lpDeleteRange(node->entry, offset, del);
             quicklistNodeUpdateSz(node);
             node->count -= del;
             quicklist->count -= del;
+            // 如果节点为空，就将节点删除
             quicklistDeleteIfEmpty(quicklist, node);
+            // 不为空，需要重新压缩
             if (node)
                 quicklistRecompressOnly(node);
         }
-
+        // 减少剩余要删除的节点
         extent -= del;
-
+        // 下一个节点
         node = next;
 
         offset = 0;
@@ -1242,20 +1460,24 @@ int quicklistDelRange(quicklist *quicklist, const long start,
 }
 
 /* compare between a two entries */
+// 比较两个条目
 int quicklistCompare(quicklistEntry* entry, unsigned char *p2, const size_t p2_len) {
+    // 如果是普通节点，直接对长度和内存进行比较
     if (unlikely(QL_NODE_IS_PLAIN(entry->node))) {
         return ((entry->sz == p2_len) && (memcmp(entry->value, p2, p2_len) == 0));
     }
+    // 对listpack进行比较
     return lpCompare(entry->zi, p2, p2_len);
 }
 
 /* Returns a quicklist iterator 'iter'. After the initialization every
  * call to quicklistNext() will return the next element of the quicklist. */
+// 返回一个quicklist的迭代器iter.在初始化以后，每一次调用quicklistNext将会返回quicklist下一个元素
 quicklistIter *quicklistGetIterator(quicklist *quicklist, int direction) {
     quicklistIter *iter;
-
+    
     iter = zmalloc(sizeof(*iter));
-
+    // 根据方向初始化当前的节点和偏移
     if (direction == AL_START_HEAD) {
         iter->current = quicklist->head;
         iter->offset = 0;
@@ -1263,7 +1485,7 @@ quicklistIter *quicklistGetIterator(quicklist *quicklist, int direction) {
         iter->current = quicklist->tail;
         iter->offset = -1;
     }
-
+    // 初始化方向和遍历的quicklist
     iter->direction = direction;
     iter->quicklist = quicklist;
 
@@ -1274,6 +1496,7 @@ quicklistIter *quicklistGetIterator(quicklist *quicklist, int direction) {
 
 /* Initialize an iterator at a specific offset 'idx' and make the iterator
  * return nodes in 'direction' direction. */
+// 用特定偏移量“idx”处的元素初始化迭代器，并使迭代器返回“direction”方向的节点
 quicklistIter *quicklistGetIteratorAtIdx(quicklist *quicklist,
                                          const int direction,
                                          const long long idx)
@@ -1281,41 +1504,52 @@ quicklistIter *quicklistGetIteratorAtIdx(quicklist *quicklist,
     quicklistNode *n;
     unsigned long long accum = 0;
     unsigned long long index;
+    // 根据索引的正负值，往前找，还是往后找
     int forward = idx < 0 ? 0 : 1; /* < 0 -> reverse, 0+ -> forward */
 
+    // 计算索引
     index = forward ? idx : (-idx) - 1;
+    // 如果超过元素数量，直接返回NULL
     if (index >= quicklist->count)
         return NULL;
 
     /* Seek in the other direction if that way is shorter. */
     int seek_forward = forward;
     unsigned long long seek_index = index;
+    // 如果换一个方向路径更短，那就调整方向
     if (index > (quicklist->count - 1) / 2) {
         seek_forward = !forward;
         seek_index = quicklist->count - 1 - index;
     }
 
     n = seek_forward ? quicklist->head : quicklist->tail;
+    // 开始遍历节点
     while (likely(n)) {
+        // 如果数量已经达到偏移，找到
         if ((accum + n->count) > seek_index) {
             break;
         } else {
             D("Skipping over (%p) %u at accum %lld", (void *)n, n->count,
               accum);
+            // 累计节点
             accum += n->count;
+            // 下一个节点
             n = seek_forward ? n->next : n->prev;
         }
     }
 
+    // 如果没找到节点直接返回NULL
     if (!n)
         return NULL;
 
     /* Fix accum so it looks like we seeked in the other direction. */
+    // 根据搜索的方向是否和原方向一致，调整accum的值
     if (seek_forward != forward) accum = quicklist->count - n->count - accum;
 
     D("Found node: %p at accum %llu, idx %llu, sub+ %llu, sub- %llu", (void *)n,
       accum, index, index - accum, (-index) - 1 + accum);
 
+    // 设置当前节点和偏移
     quicklistIter *iter = quicklistGetIterator(quicklist, direction);
     iter->current = n;
     if (forward) {
@@ -1326,12 +1560,13 @@ quicklistIter *quicklistGetIteratorAtIdx(quicklist *quicklist,
          * the result of the original index = (-idx) - 1 above. */
         iter->offset = (-index) - 1 + accum;
     }
-
+    // 返回迭代器
     return iter;
 }
 
 /* Release iterator.
  * If we still have a valid current node, then re-encode current node. */
+// 释放迭代器，如果迭代器还有一个有效的当前节点，对当前节点重新压缩
 void quicklistReleaseIterator(quicklistIter *iter) {
     if (!iter) return;
     if (iter->current)
@@ -1361,6 +1596,7 @@ void quicklistReleaseIterator(quicklistIter *iter) {
  * Returns 0 when iteration is complete or if iteration not possible.
  * If return value is 0, the contents of 'entry' are not valid.
  */
+// 得到迭代器的下一个元素
 int quicklistNext(quicklistIter *iter, quicklistEntry *entry) {
     initEntry(entry);
 
@@ -1368,7 +1604,7 @@ int quicklistNext(quicklistIter *iter, quicklistEntry *entry) {
         D("Returning because no iter!");
         return 0;
     }
-
+    // 初始化快速列表和节点
     entry->quicklist = iter->quicklist;
     entry->node = iter->current;
 
@@ -1379,65 +1615,85 @@ int quicklistNext(quicklistIter *iter, quicklistEntry *entry) {
 
     unsigned char *(*nextFn)(unsigned char *, unsigned char *) = NULL;
     int offset_update = 0;
-
+    // 是否为普通节点
     int plain = QL_NODE_IS_PLAIN(iter->current);
+    // 如果没有指向某个元素
     if (!iter->zi) {
         /* If !zi, use current index. */
         quicklistDecompressNodeForUse(iter->current);
+        // 如果是普通节点，指向节点的条目
         if (unlikely(plain))
             iter->zi = iter->current->entry;
         else
+            // 指向节点的偏移条目
             iter->zi = lpSeek(iter->current->entry, iter->offset);
-    } else if (unlikely(plain)) {
+    } 
+    // 如果是普通节点
+    else if (unlikely(plain)) {
+        // 节点中没有下一个元素，清空指向的当前元素
         iter->zi = NULL;
     } else {
         /* else, use existing iterator offset and get prev/next as necessary. */
+        // 从前往后
         if (iter->direction == AL_START_HEAD) {
             nextFn = lpNext;
             offset_update = 1;
-        } else if (iter->direction == AL_START_TAIL) {
+        } 
+        // 从后往前
+        else if (iter->direction == AL_START_TAIL) {
             nextFn = lpPrev;
             offset_update = -1;
         }
+        // 得到指向的元素和偏移
         iter->zi = nextFn(iter->current->entry, iter->zi);
         iter->offset += offset_update;
     }
-
+    // 更新到条目
     entry->zi = iter->zi;
     entry->offset = iter->offset;
 
+    // 指向某个条目
     if (iter->zi) {
+        // 普通节点，
         if (unlikely(plain)) {
             entry->value = entry->node->entry;
             entry->sz = entry->node->sz;
             return 1;
         }
         /* Populate value from existing listpack position */
+        // 得到lispack中条目的值和大小
         unsigned int sz = 0;
         entry->value = lpGetValue(entry->zi, &sz, &entry->longval);
         entry->sz = sz;
         return 1;
-    } else {
+    } 
+    // 没有指向某一个条目，说明到了节点的末尾
+    else {
         /* We ran out of listpack entries.
          * Pick next node, update offset, then re-run retrieval. */
         quicklistCompress(iter->quicklist, iter->current);
+        // 从头到尾，取下一个元素
         if (iter->direction == AL_START_HEAD) {
             /* Forward traversal */
             D("Jumping to start of next node");
             iter->current = iter->current->next;
             iter->offset = 0;
-        } else if (iter->direction == AL_START_TAIL) {
+        } 
+        // 从尾到头，取上一个元素
+        else if (iter->direction == AL_START_TAIL) {
             /* Reverse traversal */
             D("Jumping to end of previous node");
             iter->current = iter->current->prev;
             iter->offset = -1;
         }
         iter->zi = NULL;
+        // 然后递归重新取一次
         return quicklistNext(iter, entry);
     }
 }
 
 /* Sets the direction of a quicklist iterator. */
+// 设置quicklist迭代器的方向
 void quicklistSetDirection(quicklistIter *iter, int direction) {
     iter->direction = direction;
 }
@@ -1448,31 +1704,40 @@ void quicklistSetDirection(quicklistIter *iter, int direction) {
  * The original quicklist both on success or error is never modified.
  *
  * Returns newly allocated quicklist. */
+// 复制quicklist
+// 如果成功一个原始quicklist的拷贝将会返回
+// 该原始的quicklist不管成功还是失败都不会被修改
+// 返回新分配的quicklist
 quicklist *quicklistDup(quicklist *orig) {
     quicklist *copy;
-
+    // 创建一个新的quicklist，设置fill和compress
     copy = quicklistNew(orig->fill, orig->compress);
 
+    // 遍历节点，然后拷贝
     for (quicklistNode *current = orig->head; current;
          current = current->next) {
+        // 创建节点
         quicklistNode *node = quicklistCreateNode();
-
+        // LZF压缩节点
         if (current->encoding == QUICKLIST_NODE_ENCODING_LZF) {
             quicklistLZF *lzf = (quicklistLZF *)current->entry;
             size_t lzf_sz = sizeof(*lzf) + lzf->sz;
             node->entry = zmalloc(lzf_sz);
             memcpy(node->entry, current->entry, lzf_sz);
-        } else if (current->encoding == QUICKLIST_NODE_ENCODING_RAW) {
+        } 
+        // 原生节点
+        else if (current->encoding == QUICKLIST_NODE_ENCODING_RAW) {
             node->entry = zmalloc(current->sz);
             memcpy(node->entry, current->entry, current->sz);
         }
 
+        // 设置节点的元素个数，尺寸，编码，存储方式等
         node->count = current->count;
         copy->count += node->count;
         node->sz = current->sz;
         node->encoding = current->encoding;
         node->container = current->container;
-
+        // 节点插入到列表后面
         _quicklistInsertNodeAfter(copy, copy->tail, node);
     }
 
@@ -1488,37 +1753,53 @@ quicklist *quicklistDup(quicklist *orig) {
  *
  * Returns an iterator at a specific offset 'idx' if element found
  * Returns NULL if element not found */
+// 将“entry”填充为指定基于0位为索引的元素，其中0是头部，1是紧跟头部的元素，
+// 以此类推。 使用负整数从尾部开始计数，-1是最后一个元素，-2是倒数第二个元素，以此类推。如果索引超出范围，将返回0。
+// 
+// 返回值：找到指定偏移idx上的元素并返回一个迭代器，如果元素没有找到就返回NULL
 quicklistIter *quicklistGetIteratorEntryAtIdx(quicklist *quicklist, const long long idx,
                                               quicklistEntry *entry)
 {
+    // 得到idx处的元素，并返回迭代器
     quicklistIter *iter = quicklistGetIteratorAtIdx(quicklist, AL_START_TAIL, idx);
     if (!iter) return NULL;
+    // 得到对应元素放入entry中
     assert(quicklistNext(iter, entry));
     return iter;
 }
 
+// 快速列表旋转
 static void quicklistRotatePlain(quicklist *quicklist) {
+    // 尾结点变成新的头节点
     quicklistNode *new_head = quicklist->tail;
+    // 尾结点的前一个节点变成新的尾节点
     quicklistNode *new_tail = quicklist->tail->prev;
+    
+    // 处理原来的头、尾，新的头、尾链表关系
     quicklist->head->prev = new_head;
     new_tail->next = NULL;
     new_head->next = quicklist->head;
     new_head->prev = NULL;
+    // 设置快速表的头，尾节点
     quicklist->head = new_head;
     quicklist->tail = new_tail;
 }
 
 /* Rotate quicklist by moving the tail element to the head. */
+// 通过将尾部元素移动到头部来旋转quicklist
 void quicklistRotate(quicklist *quicklist) {
+    // 如果元素数目小于等于1，怎么旋转都一样
     if (quicklist->count <= 1)
         return;
 
+    // 如果尾部节点是一个普通节点，直接旋转节点就行
     if (unlikely(QL_NODE_IS_PLAIN(quicklist->tail))) {
         quicklistRotatePlain(quicklist);
         return;
     }
 
     /* First, get the tail entry */
+    // 首先，得到尾部元素的数据
     unsigned char *p = lpSeek(quicklist->tail->entry, -1);
     unsigned char *value, *tmp;
     long long longval;
@@ -1527,13 +1808,18 @@ void quicklistRotate(quicklist *quicklist) {
     tmp = lpGetValue(p, &sz, &longval);
 
     /* If value found is NULL, then lpGet populated longval instead */
+    // 如果找到的值为NULL，则改为lpGet填充longval
     if (!tmp) {
         /* Write the longval as a string so we can re-add it */
+        // 将longval写成字符串，以便我们可以重新添加它
         sz = ll2string(longstr, sizeof(longstr), longval);
         value = (unsigned char *)longstr;
-    } else if (quicklist->len == 1) {
+    }
+    // 如果quicklist只有一个节点
+    else if (quicklist->len == 1) {
         /* Copy buffer since there could be a memory overlap when move
          * entity from tail to head in the same listpack. */
+        // 复制缓冲区，因为在同一个listpack中将实体从尾部移动到头部时可能存在内存重叠
         value = zmalloc(sz);
         memcpy(value, tmp, sz);
     } else {
@@ -1541,17 +1827,22 @@ void quicklistRotate(quicklist *quicklist) {
     }
 
     /* Add tail entry to head (must happen before tail is deleted). */
+    // 将尾元素加到头部（必须在尾元素删除之前）
     quicklistPushHead(quicklist, value, sz);
 
     /* If quicklist has only one node, the head listpack is also the
      * tail listpack and PushHead() could have reallocated our single listpack,
      * which would make our pre-existing 'p' unusable. */
+    // 如果quicklist只有一个节点，那么开始的listpack也是末尾的listpack，PushHead可能会
+    // 重新分配我们的单个列表包，这将使我们之前存在的“p”不可用，所以得重新取一次
     if (quicklist->len == 1) {
         p = lpSeek(quicklist->tail->entry, -1);
     }
 
     /* Remove tail entry. */
+    // 将尾部元素删除
     quicklistDelIndex(quicklist, quicklist->tail, &p);
+    // 释放临时分配的内存
     if (value != (unsigned char*)longstr && value != tmp)
         zfree(value);
 }
@@ -1565,6 +1856,11 @@ void quicklistRotate(quicklist *quicklist) {
  * Return value of 0 means no elements available.
  * Return value of 1 means check 'data' and 'sval' for values.
  * If 'data' is set, use 'data' and 'sz'.  Otherwise, use 'sval'. */
+// 从quicklist中弹出并在“data”指针中返回结果。如果数据不是数字，则“data”的值是“saver”函数的返回值
+// 如果quicklist元素是long-long，则返回值以'sval形式返回
+// 返回值0表示没有元素可用
+// 返回值1表示检查data和sval
+// 如果data被设置了值，这使用data和sz。否则使用sval
 int quicklistPopCustom(quicklist *quicklist, int where, unsigned char **data,
                        size_t *sz, long long *sval,
                        void *(*saver)(unsigned char *data, size_t sz)) {
@@ -1573,10 +1869,11 @@ int quicklistPopCustom(quicklist *quicklist, int where, unsigned char **data,
     unsigned int vlen;
     long long vlong;
     int pos = (where == QUICKLIST_HEAD) ? 0 : -1;
-
+    // 如果没有元素，直接返回0
     if (quicklist->count == 0)
         return 0;
 
+    // 将这些可以承载弹出数据的
     if (data)
         *data = NULL;
     if (sz)
@@ -1584,6 +1881,7 @@ int quicklistPopCustom(quicklist *quicklist, int where, unsigned char **data,
     if (sval)
         *sval = -123456789;
 
+    // 更加从头还是尾弹出，取出节点
     quicklistNode *node;
     if (where == QUICKLIST_HEAD && quicklist->head) {
         node = quicklist->head;
@@ -1594,35 +1892,44 @@ int quicklistPopCustom(quicklist *quicklist, int where, unsigned char **data,
     }
 
     /* The head and tail should never be compressed */
+    // 头和尾节点都不应该压缩
     assert(node->encoding != QUICKLIST_NODE_ENCODING_LZF);
 
+    // 如果是普通节点，保存数据
     if (unlikely(QL_NODE_IS_PLAIN(node))) {
         if (data)
             *data = saver(node->entry, node->sz);
         if (sz)
             *sz = node->sz;
+        // 删除节点
         quicklistDelIndex(quicklist, node, NULL);
         return 1;
     }
-
+    // 移动到指定位置
     p = lpSeek(node->entry, pos);
+    // 获取指定位置的值
     vstr = lpGetValue(p, &vlen, &vlong);
+    // 如果是二进制流
     if (vstr) {
+        // 通过传入的saver函数处理
         if (data)
             *data = saver(vstr, vlen);
         if (sz)
             *sz = vlen;
     } else {
+        // 得到数字相关的数据
         if (data)
             *data = NULL;
         if (sval)
             *sval = vlong;
     }
+    // 删除对应的元素
     quicklistDelIndex(quicklist, node, &p);
     return 1;
 }
 
 /* Return a malloc'd copy of data passed in */
+// 返回一个传入数据的分配内存的拷贝
 REDIS_STATIC void *_quicklistSaver(unsigned char *data, size_t sz) {
     unsigned char *vstr;
     if (data) {
@@ -1636,6 +1943,7 @@ REDIS_STATIC void *_quicklistSaver(unsigned char *data, size_t sz) {
 /* Default pop function
  *
  * Returns malloc'd value from quicklist */
+// 默认的pop函数，返回一个分配好的值给quicklist
 int quicklistPop(quicklist *quicklist, int where, unsigned char **data,
                  size_t *sz, long long *slong) {
     unsigned char *vstr = NULL;
@@ -1643,6 +1951,7 @@ int quicklistPop(quicklist *quicklist, int where, unsigned char **data,
     long long vlong = 0;
     if (quicklist->count == 0)
         return 0;
+    // 弹出数据，转换为外面的参数
     int ret = quicklistPopCustom(quicklist, where, &vstr, &vlen, &vlong,
                                  _quicklistSaver);
     if (data)
@@ -1655,14 +1964,17 @@ int quicklistPop(quicklist *quicklist, int where, unsigned char **data,
 }
 
 /* Wrapper to allow argument-based switching between HEAD/TAIL pop */
+// 包装器，允许在HEAD/TAIL push之间进行基于参数的切换
 void quicklistPush(quicklist *quicklist, void *value, const size_t sz,
                    int where) {
     /* The head and tail should never be compressed (we don't attempt to decompress them) */
+    // 头，尾节点不能压缩
     if (quicklist->head)
         assert(quicklist->head->encoding != QUICKLIST_NODE_ENCODING_LZF);
     if (quicklist->tail)
         assert(quicklist->tail->encoding != QUICKLIST_NODE_ENCODING_LZF);
 
+    // 从头或者尾压入数据
     if (where == QUICKLIST_HEAD) {
         quicklistPushHead(quicklist, value, sz);
     } else if (where == QUICKLIST_TAIL) {

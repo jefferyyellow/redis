@@ -130,6 +130,7 @@ client *createClient(connection *conn) {
         connEnableTcpNoDelay(conn);
         if (server.tcpkeepalive)
             connKeepAlive(conn,server.tcpkeepalive);
+        // 设置连接的读取函数
         connSetReadHandler(conn, readQueryFromClient);
         connSetPrivateData(conn, c);
     }
@@ -1210,6 +1211,7 @@ void copyReplicaOutputBuffer(client *dst, client *src) {
 
 /* Return true if the specified client has pending reply buffers to write to
  * the socket. */
+// 如果指定的客户端有未处理的回复缓冲区要写入套接字，则返回true。
 int clientHasPendingReplies(client *c) {
     if (getClientType(c) == CLIENT_TYPE_SLAVE) {
         /* Replicas use global shared replication buffer instead of
@@ -2081,11 +2083,15 @@ void protectClient(client *c) {
 }
 
 /* This will undo the client protection done by protectClient() */
+// 这将撤销通过protectClient所做的客户端保护
 void unprotectClient(client *c) {
     if (c->flags & CLIENT_PROTECTED) {
+        // 去除保护标志
         c->flags &= ~CLIENT_PROTECTED;
+        // 设置读取函数
         if (c->conn) {
             connSetReadHandler(c->conn,readQueryFromClient);
+            // 如果指定的客户端有未处理的回复缓冲区要写入套接字，处理
             if (clientHasPendingReplies(c)) putClientInPendingWriteQueue(c);
         }
     }

@@ -46,11 +46,15 @@
 #define LP_REPLACE 2
 
 /* Each entry in the listpack is either a string or an integer. */
+// 每个listpack中的元素是一个字符串或者整数
+// list pack中的元素
 typedef struct {
     /* When string is used, it is provided with the length (slen). */
+    // 如果是字符串的话，sval是字符串，slen是字符串的长度
     unsigned char *sval;
     uint32_t slen;
     /* When integer is used, 'sval' is NULL, and lval holds the value. */
+    // 如果是整数的话，sval为空，lval就是整数值
     long long lval;
 } listpackEntry;
 
