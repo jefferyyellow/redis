@@ -335,6 +335,7 @@ static int connSocketAddr(connection *conn, char *ip, size_t ip_len, int *port, 
     return C_ERR;
 }
 
+// 创建侦听套接字
 static int connSocketListen(connListener *listener) {
     return listenToPort(listener);
 }

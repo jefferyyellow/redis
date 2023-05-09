@@ -69,7 +69,7 @@
 #endif
 
 /* Our shared "common" objects */
-
+// 共享的通用对象
 struct sharedObjectsStruct shared;
 
 /* Global vars that are actually used as constants. The following double
@@ -1626,17 +1626,25 @@ extern int ProcessingEventsWhileBlocked;
 /* This function gets called every time Redis is entering the
  * main loop of the event driven library, that is, before to sleep
  * for ready file descriptors.
- *
+ * 每当Redis进入事件驱动库的主循环时，也就是说，在为就绪文件描述符休眠之前，都会调用此函数。
+ * 
  * Note: This function is (currently) called from two functions:
  * 1. aeMain - The main server loop
  * 2. processEventsWhileBlocked - Process clients during RDB/AOF load
- *
+ * 注意：这个函数（目前）是从两个函数调用的：
+ * 1.aeMain-主服务器循环
+ * 2.processEventsWhileBlocked-在RDB/AOF加载期间处理客户端
+ * 
  * If it was called from processEventsWhileBlocked we don't want
  * to perform all actions (For example, we don't want to expire
  * keys), but we do need to perform some actions.
- *
+ * 如果是从processEventsWhileBlocked调用的，我们不需要执行所有的动作
+ * 
  * The most important is freeClientsInAsyncFreeQueue but we also
- * call some other low-risk functions. */
+ * call some other low-risk functions. 
+ * 最重要的一点是freeClientsInAsyncFreeQueue，但是我们也调用一些低风险函数
+ * 
+ * */
 void beforeSleep(struct aeEventLoop *eventLoop) {
     UNUSED(eventLoop);
 
@@ -1681,7 +1689,10 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
 
     /* Run a fast expire cycle (the called function will return
      * ASAP if a fast cycle is not needed). */
+    // 如果开启周期性删除过期键策略并且是主节点（server.masterhost表示主节点）
     if (server.active_expire_enabled && server.masterhost == NULL)
+        // 调用函数activeExpireCycle执行过期键删除，只是参数传递的是ACTIVE_EXPIRE_CYCLE_FAST，
+        // 表示快速过期键删除。
         activeExpireCycle(ACTIVE_EXPIRE_CYCLE_FAST);
 
     /* Unblock all the clients blocked for synchronous replication
@@ -1795,11 +1806,12 @@ void afterSleep(struct aeEventLoop *eventLoop) {
 }
 
 /* =========================== Server initialization ======================== */
-
+// 创建共享对象
 void createSharedObjects(void) {
     int j;
 
     /* Shared command responses */
+    // 命令回复
     shared.ok = createObject(OBJ_STRING,sdsnew("+OK\r\n"));
     shared.emptybulk = createObject(OBJ_STRING,sdsnew("$0\r\n\r\n"));
     shared.czero = createObject(OBJ_STRING,sdsnew(":0\r\n"));
@@ -1812,6 +1824,7 @@ void createSharedObjects(void) {
     shared.plus = createObject(OBJ_STRING,sdsnew("+"));
 
     /* Shared command error responses */
+    // 命令错误回复
     shared.wrongtypeerr = createObject(OBJ_STRING,sdsnew(
         "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"));
     shared.err = createObject(OBJ_STRING,sdsnew("-ERR\r\n"));
@@ -1851,6 +1864,7 @@ void createSharedObjects(void) {
         "-BUSYKEY Target key name already exists.\r\n"));
 
     /* The shared NULL depends on the protocol version. */
+    // 共享的NULL取决于协议版本。
     shared.null[0] = NULL;
     shared.null[1] = NULL;
     shared.null[2] = createObject(OBJ_STRING,sdsnew("$-1\r\n"));
@@ -1892,6 +1906,7 @@ void createSharedObjects(void) {
     shared.punsubscribebulk = createStringObject("$12\r\npunsubscribe\r\n",19);
 
     /* Shared command names */
+    // 共享的命令名字
     shared.del = createStringObject("DEL",3);
     shared.unlink = createStringObject("UNLINK",6);
     shared.rpop = createStringObject("RPOP",4);
@@ -1917,6 +1932,7 @@ void createSharedObjects(void) {
     shared.eval = createStringObject("EVAL",4);
 
     /* Shared command argument */
+    // 共享的命令参数
     shared.left = createStringObject("left",4);
     shared.right = createStringObject("right",5);
     shared.pxat = createStringObject("PXAT", 4);
@@ -1938,6 +1954,7 @@ void createSharedObjects(void) {
     shared.special_equals = createStringObject("=",1);
     shared.redacted = makeObjectShared(createStringObject("(redacted)",10));
 
+    // 创建0~10000整数对象
     for (j = 0; j < OBJ_SHARED_INTEGERS; j++) {
         shared.integers[j] =
             makeObjectShared(createObject(OBJ_STRING,(void*)(long)j));
@@ -2405,6 +2422,7 @@ void closeListener(connListener *sfd) {
  * This works atomically for all socket fds */
 // 创建一个事件处理程序，用于接受TCP或TLS域套接字中的新连接。这对所有套接字fds都起原子作用
 // 现接收客户端连接的处理函数为accept_handler
+// 侦听套接字的文件事件
 int createSocketAcceptHandler(connListener *sfd, aeFileProc *accept_handler) {
     int j;
     // 根据侦听数量，创建多个关心事件
@@ -2438,25 +2456,33 @@ int createSocketAcceptHandler(connListener *sfd, aeFileProc *accept_handler) {
  * impossible to bind, or no bind addresses were specified in the server
  * configuration but the function is not able to bind * for at least
  * one of the IPv4 or IPv6 protocols. */
+// 初始化一系列的文件描述符去侦听指定的端口，绑定在redis服务器配置文件中指定的地址
+//
 int listenToPort(connListener *sfd) {
     int j;
     int port = sfd->port;
     char **bindaddr = sfd->bindaddr;
 
     /* If we have no bind address, we don't listen on a TCP socket */
+    // 如果没有绑定地址，不需要侦听Tcp套接字
     if (sfd->bindaddr_count == 0) return C_OK;
 
+    // 遍历每一个绑定地址
     for (j = 0; j < sfd->bindaddr_count; j++) {
         char* addr = bindaddr[j];
         int optional = *addr == '-';
         if (optional) addr++;
+        // 如果是IPv6
         if (strchr(addr,':')) {
             /* Bind IPv6 address. */
             sfd->fd[sfd->count] = anetTcp6Server(server.neterr,port,addr,server.tcp_backlog);
-        } else {
+        } 
+        // IPv4
+        else {
             /* Bind IPv4 address. */
             sfd->fd[sfd->count] = anetTcpServer(server.neterr,port,addr,server.tcp_backlog);
         }
+        // 如果返回错误
         if (sfd->fd[sfd->count] == ANET_ERR) {
             int net_errno = errno;
             serverLog(LL_WARNING,
@@ -2470,11 +2496,15 @@ int listenToPort(connListener *sfd) {
                 continue;
 
             /* Rollback successful listens before exiting */
+            // 在退出之前，将成功侦听的端口也关闭了
             closeListener(sfd);
             return C_ERR;
         }
+        // 设置套接字标记的ID
         if (server.socket_mark_id > 0) anetSetSockMarkId(NULL, sfd->fd[sfd->count], server.socket_mark_id);
+        // 将套接字设置为非阻塞模式
         anetNonBlock(NULL,sfd->fd[sfd->count]);
+        // 套装字不被子进程继承
         anetCloexec(sfd->fd[sfd->count]);
         sfd->count++;
     }
@@ -2606,33 +2636,52 @@ void initServer(void) {
     server.ready_keys = listCreate();
     // 跟踪待清除的无效key列表
     server.tracking_pending_keys = listCreate();
+    // 在WAIT命令中等待的客户端列表
     server.clients_waiting_acks = listCreate();
+    // 不发送REPLCONF GETACK
     server.get_ack_from_slaves = 0;
+    // 当前暂停的操作位掩码
     server.paused_actions = 0;
+    // 情况暂停事件
     memset(server.client_pause_per_purpose, 0,
            sizeof(server.client_pause_per_purpose));
+    // 延期的客户端列表
     server.postponed_clients = listCreate();
+    // 在阻塞状态下处理的事件数初始化为0
     server.events_processed_while_blocked = 0;
+    // 操作系统总共的内存
     server.system_memory_size = zmalloc_get_memory_size();
+    // Redis服务器最后一次被阻塞的时间
     server.blocked_last_cron = 0;
+    // 阻塞操作的嵌套深度，初始为 0
     server.blocking_op_nesting = 0;
+    // 默认不启用Transparent Huge Pages
     server.thp_enabled = 0;
+    // 集群节点间通信中过滤器的编号，初始化为 -1
     server.cluster_drop_packet_filter = -1;
+    // 回复缓冲区的峰值重置时间
     server.reply_buffer_peak_reset_time = REPLY_BUFFER_DEFAULT_PEAK_RESET_TIME;
+    // 启用回复缓冲区大小调整
     server.reply_buffer_resizing_enabled = 1;
+    // 跟踪客户端的内存使用情况,如果为NULL表示未启用内存使用统计。
     server.client_mem_usage_buckets = NULL;
+    // 重置复制缓冲区
     resetReplicationBuffer();
 
     /* Make sure the locale is set on startup based on the config file. */
+    // 确保在启动时根据配置文件设置区域设置
     if (setlocale(LC_COLLATE,server.locale_collate) == NULL) {
         serverLog(LL_WARNING, "Failed to configure LOCALE for invalid locale name.");
         exit(1);
     }
-
+    // 创建共享对象
     createSharedObjects();
+    // 调整打开文件的限制
     adjustOpenFilesLimit();
+    // 初始化时钟
     const char *clk_msg = monotonicInit();
     serverLog(LL_NOTICE, "monotonic clock: %s", clk_msg);
+    // 创建事件循环,为了确保安全，这里设置setsize等于最大客户端数目加128
     server.el = aeCreateEventLoop(server.maxclients+CONFIG_FDSET_INCR);
     if (server.el == NULL) {
         serverLog(LL_WARNING,
@@ -2640,9 +2689,11 @@ void initServer(void) {
             strerror(errno));
         exit(1);
     }
+    // 创建数据库
     server.db = zmalloc(sizeof(redisDb)*server.dbnum);
 
     /* Create the Redis databases, and initialize other internal state. */
+    // 创建数据库并初始化一些内部状态
     for (j = 0; j < server.dbnum; j++) {
         server.db[j].dict = dictCreate(&dbDictType);
         server.db[j].expires = dictCreate(&dbExpiresDictType);
@@ -2657,37 +2708,53 @@ void initServer(void) {
         server.db[j].slots_to_keys = NULL; /* Set by clusterInit later on if necessary. */
         listSetFreeMethod(server.db[j].defrag_later,(void (*)(void*))sdsfree);
     }
+    // 分配内存来初始化用于LRU的键池
     evictionPoolAlloc(); /* Initialize the LRU keys pool. */
+    // 发布订阅的三个字典的初始化
     server.pubsub_channels = dictCreate(&keylistDictType);
     server.pubsub_patterns = dictCreate(&keylistDictType);
     server.pubsubshard_channels = dictCreate(&keylistDictType);
+    // serverCron函数的执行次数初始化为0
     server.cronloops = 0;
+    // 没有在执行Redis的事务操作。
     server.in_exec = 0;
+    // 在Redis执行长时间的阻塞操作时，用于指示是否可以中断阻塞操作。
     server.busy_module_yield_flags = BUSY_MODULE_YIELD_NONE;
     server.busy_module_yield_reply = NULL;
+    // 表示是否在Redis事务操作中暂停了客户端。
     server.client_pause_in_transaction = 0;
+    // 下面3个字段用于Redis的持久化功能，记录持久化子进程的相关信息
     server.child_pid = -1;
     server.child_type = CHILD_TYPE_NONE;
     server.rdb_child_type = RDB_CHILD_TYPE_NONE;
+    // 下面5个字段用于Redis进行RDB持久化时，缓存数据写入管道的相关信息
     server.rdb_pipe_conns = NULL;
     server.rdb_pipe_numconns = 0;
     server.rdb_pipe_numconns_writing = 0;
     server.rdb_pipe_buff = NULL;
     server.rdb_pipe_bufflen = 0;
+    // 表示是否已经安排了RDB持久化操作
     server.rdb_bgsave_scheduled = 0;
+    // 用于与持久化子进程进行通信。
     server.child_info_pipe[0] = -1;
     server.child_info_pipe[1] = -1;
+    // 最后一次从管道中读取了0个字节
     server.child_info_nread = 0;
+    // 用于Redis进行AOF持久化时，缓存待写入AOF文件的数据的缓冲区
     server.aof_buf = sdsempty();
+    // 下面几个字段用于记录Redis的持久化状态。
     server.lastsave = time(NULL); /* At startup we consider the DB saved. */
     server.lastbgsave_try = 0;    /* At startup we never tried to BGSAVE. */
     server.rdb_save_time_last = -1;
     server.rdb_save_time_start = -1;
     server.rdb_last_load_keys_expired = 0;
     server.rdb_last_load_keys_loaded = 0;
+    // 记录Redis的脏键数量。
     server.dirty = 0;
+    //
     resetServerStats();
     /* A few stats we don't want to reset: server startup time, and peak mem. */
+    // 一系列统计信息，用于记录Redis的运行状态
     server.stat_starttime = time(NULL);
     server.stat_peak_memory = 0;
     server.stat_current_cow_peak = 0;
@@ -2702,11 +2769,15 @@ void initServer(void) {
     for (int j = 0; j < CLIENT_TYPE_COUNT; j++)
         server.stat_clients_type_memory[j] = 0;
     server.stat_cluster_links_memory = 0;
+
+    // 记录Redis的内存使用情况
     server.cron_malloc_stats.zmalloc_used = 0;
     server.cron_malloc_stats.process_rss = 0;
     server.cron_malloc_stats.allocator_allocated = 0;
     server.cron_malloc_stats.allocator_active = 0;
     server.cron_malloc_stats.allocator_resident = 0;
+
+    // 用于Redis的持久化和主从复制功能
     server.lastbgsave_status = C_OK;
     server.aof_last_write_status = C_OK;
     server.aof_last_write_errno = 0;
@@ -2714,6 +2785,7 @@ void initServer(void) {
     server.last_sig_received = 0;
 
     /* Initiate acl info struct */
+    // 初始化acl信息
     server.acl_info.invalid_cmd_accesses = 0;
     server.acl_info.invalid_key_accesses  = 0;
     server.acl_info.user_auth_failures = 0;
@@ -2722,6 +2794,7 @@ void initServer(void) {
     /* Create the timer callback, this is our way to process many background
      * operations incrementally, like clients timeout, eviction of unaccessed
      * expired keys and so forth. */
+    // 创建定时器回调，这是我们增量处理许多后台操作的方法，如客户端超时、淘汰未处理的过期密钥等等
     if (aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
         serverPanic("Can't create event loop timers.");
         exit(1);
@@ -2729,6 +2802,7 @@ void initServer(void) {
 
     /* Register a readable event for the pipe used to awake the event loop
      * from module threads. */
+    // 创建定时器回调，这是我们增量处理许多后台操作的方法，如客户端超时、淘汰未处理的过期密钥等等。
     if (aeCreateFileEvent(server.el, server.module_pipe[0], AE_READABLE,
         modulePipeReadable,NULL) == AE_ERR) {
             serverPanic(
@@ -2737,6 +2811,7 @@ void initServer(void) {
 
     /* Register before and after sleep handlers (note this needs to be done
      * before loading persistence since it is used by processEventsWhileBlocked. */
+    // 注册睡眠前和睡眠后处理程序（注意，这需要在加载持久性之前完成，因为它由processEventsWhileBlocked使用。）
     aeSetBeforeSleepProc(server.el,beforeSleep);
     aeSetAfterSleepProc(server.el,afterSleep);
 
@@ -2744,26 +2819,33 @@ void initServer(void) {
      * no explicit limit in the user provided configuration we set a limit
      * at 3 GB using maxmemory with 'noeviction' policy'. This avoids
      * useless crashes of the Redis instance for out of memory. */
+    // 32位实例的地址空间限制为4GB，因此，如果用户提供的配置中没有明确的限制，
+    // 我们将使用“noevision”策略的maxmemory将限制设置为3 GB。这避免了Redis实例因内存不足而发生无用的崩溃。
     if (server.arch_bits == 32 && server.maxmemory == 0) {
         serverLog(LL_WARNING,"Warning: 32 bit instance detected but no memory limit set. Setting 3 GB maxmemory limit with 'noeviction' policy now.");
         server.maxmemory = 3072LL*(1024*1024); /* 3 GB */
         server.maxmemory_policy = MAXMEMORY_NO_EVICTION;
     }
-
+    // 初始化脚本系统
     scriptingInit(1);
+    // 初始化Redis内置函数
     functionsInit();
+    // 初始化慢查询日志系统
     slowlogInit();
+    // 初始化延迟监视器
     latencyMonitorInit();
 
     /* Initialize ACL default password if it exists */
+    // 更新默认用户密码
     ACLUpdateDefaultUserPassword(server.requirepass);
-
+    // 看门狗
     applyWatchdogPeriod();
-
+    // 客户端内存限制
     if (server.maxmemory_clients != 0)
         initServerClientMemUsageBuckets();
 }
 
+// 根据服务器的配置，创建TCP/TLS/Unix需要的侦听套接字
 void initListeners() {
     /* Setup listeners from server config for TCP/TLS/Unix */
     int conn_index;
@@ -3272,6 +3354,7 @@ struct redisCommand *lookupCommandOrOriginal(robj **argv ,int argc) {
 }
 
 /* Commands arriving from the master client or AOF client, should never be rejected. */
+// 来自主节点客户端或AOF客户端的命令永远不应被拒绝。
 int mustObeyClient(client *c) {
     return c->id == CLIENT_ID_AOF || c->flags & CLIENT_MASTER;
 }
@@ -3476,6 +3559,7 @@ void postExecutionUnitOperations() {
  * twice, its possible to pass a NULL cmd value to indicate that the error was counted elsewhere.
  *
  * The function returns true if stats was updated and false if not. */
+// 增加命令失败计数器（rejected_calls或failed_calles）
 int incrCommandStatsOnError(struct redisCommand *cmd, int flags) {
     /* hold the prev error count captured on the last command execution */
     static long long prev_err_count = 0;
@@ -3532,6 +3616,7 @@ int incrCommandStatsOnError(struct redisCommand *cmd, int flags) {
  * preventCommandReplication(client *c);
  *
  */
+// call是redis执行命令的核心函数
 void call(client *c, int flags) {
     long long dirty;
     uint64_t client_old_flags = c->flags;
@@ -3539,6 +3624,7 @@ void call(client *c, int flags) {
 
     /* Initialization: clear the flags that must be set by the command on
      * demand, and initialize the array for additional commands propagation. */
+    // 初始化：根据需要清除命令必须设置的标志，并初始化数组以进行额外的命令传播
     c->flags &= ~(CLIENT_FORCE_AOF|CLIENT_FORCE_REPL|CLIENT_PREVENT_PROP);
 
     /* Redis core is in charge of propagation when the first entry point
@@ -3546,9 +3632,14 @@ void call(client *c, int flags) {
      * The only other option to get to call() without having processCommand
      * as an entry point is if a module triggers RM_Call outside of call()
      * context (for example, in a timer).
-     * In that case, the module is in charge of propagation. */
+     * In that case, the module is in charge of propagation. 
+     * 当call的第一个进入点是processCommand，redis的核心就是负责传播。
+     * 在没有processCommand作为入口点的情况下进入call（）的唯一其他选项是，
+     * 如果模块在call（）上下文之外触发RM_call（例如，在计时器中）。在这种情况下，模块负责传播。
+     * */
 
     /* Call the command. */
+    // 调用命令
     dirty = server.dirty;
     incrCommandStatsOnError(NULL, 0);
 
@@ -3556,41 +3647,50 @@ void call(client *c, int flags) {
 
     /* Update cache time, in case we have nested calls we want to
      * update only on the first call */
+    // 更新缓存时间，如果我们有嵌套调用，我们只想在第一次调用时更新
     if (server.execution_nesting++ == 0) {
         updateCachedTimeWithUs(0,call_timer);
     }
 
     monotime monotonic_start = 0;
+    // 命令开始执行时间
     if (monotonicGetType() == MONOTONIC_CLOCK_HW)
         monotonic_start = getMonotonicUs();
-
+    // 命令处理
     c->cmd->proc(c);
+    // 减少嵌套计数
     server.execution_nesting--;
 
     /* In order to avoid performance implication due to querying the clock using a system call 3 times,
      * we use a monotonic clock, when we are sure its cost is very low, and fall back to non-monotonic call otherwise. */
+    // 为了避免由于使用系统调用查询时钟3次而导致的性能影响，当我们确信其成本非常低时，我们使用monotonic，否则会回退到non-monotonic调用
     ustime_t duration;
     if (monotonicGetType() == MONOTONIC_CLOCK_HW)
         duration = getMonotonicUs() - monotonic_start;
     else
         duration = ustime() - call_timer;
 
+    // 得到执行时间
     c->duration = duration;
+    // 计算脏键的差值
     dirty = server.dirty-dirty;
     if (dirty < 0) dirty = 0;
 
     /* Update failed command calls if required. */
-
+    // 如果需要,更新命令失败计数
     if (!incrCommandStatsOnError(real_cmd, ERROR_COMMAND_FAILED) && c->deferred_reply_errors) {
         /* When call is used from a module client, error stats, and total_error_replies
          * isn't updated since these errors, if handled by the module, are internal,
          * and not reflected to users. however, the commandstats does show these calls
          * (made by RM_Call), so it should log if they failed or succeeded. */
+        // 当从模块客户端使用调用时，错误统计信息和total_error_resports不会更新，因为这些错误（如果由模块处理）是内部的，
+        // 不会反映给用户。但是，commandstats确实显示了这些调用（由RM_Call进行），因此它应该记录它们是否失败或成功
         real_cmd->failed_calls++;
     }
 
     /* After executing command, we will close the client after writing entire
      * reply if it is set 'CLIENT_CLOSE_AFTER_COMMAND' flag. */
+    // 执行命令后，如果设置了“client_close_After_command”标志，我们将在写入整个回复后关闭客户端。
     if (c->flags & CLIENT_CLOSE_AFTER_COMMAND) {
         c->flags &= ~CLIENT_CLOSE_AFTER_COMMAND;
         c->flags |= CLIENT_CLOSE_AFTER_REPLY;
@@ -3598,12 +3698,14 @@ void call(client *c, int flags) {
 
     /* When EVAL is called loading the AOF we don't want commands called
      * from Lua to go into the slowlog or to populate statistics. */
+    // 当调用EVAL加载AOF时，我们不希望从lua来的命令调用情况进入慢日志或者填充统计信息
     if (server.loading && c->flags & CLIENT_SCRIPT)
         flags &= ~(CMD_CALL_SLOWLOG | CMD_CALL_STATS);
 
     /* If the caller is Lua, we want to force the EVAL caller to propagate
      * the script if the command flag or client flag are forcing the
      * propagation. */
+    // 如果调用者是lua，如果命令的标志或者客户端的标志是强制传播，我们需要强制EVAL的调用者去传播。
     if (c->flags & CLIENT_SCRIPT && server.script_caller) {
         if (c->flags & CLIENT_FORCE_REPL)
             server.script_caller->flags |= CLIENT_FORCE_REPL;
@@ -3614,10 +3716,13 @@ void call(client *c, int flags) {
     /* Note: the code below uses the real command that was executed
      * c->cmd and c->lastcmd may be different, in case of MULTI-EXEC or
      * re-written commands such as EXPIRE, GEOADD, etc. */
+    // 注意：如果是MULTI-EXEC或EXPIRE、GEOADD等重写命令，则以下代码使用执行的实际命令c->cmd和c->lastcmd可能不同
 
     /* Record the latency this command induced on the main thread.
      * unless instructed by the caller not to log. (happens when processing
-     * a MULTI-EXEC from inside an AOF). */
+     * a MULTI-EXEC from inside an AOF). 
+     * 记录此命令在主线程上引起的延迟。除非呼叫者指示不要登录。（从AOF内部处理MULTI-EXEC时发生）
+     * */
     if (flags & CMD_CALL_SLOWLOG) {
         char *latency_event = (real_cmd->flags & CMD_FAST) ?
                                "fast-command" : "command";
@@ -3626,11 +3731,13 @@ void call(client *c, int flags) {
 
     /* Log the command into the Slow log if needed.
      * If the client is blocked we will handle slowlog when it is unblocked. */
+    // 如果需要，请将命令记录到慢速日志中。如果客户端被阻止，我们将在解除阻止时处理slowlog
     if ((flags & CMD_CALL_SLOWLOG) && !(c->flags & CLIENT_BLOCKED))
         slowlogPushCurrentCommand(c, real_cmd, duration);
 
     /* Send the command to clients in MONITOR mode if applicable.
      * Administrative commands are considered too dangerous to be shown. */
+    // 在MONITOR模式下向客户端发送命令（如果适用）。管理命令被认为过于危险，无法显示
     if (!(c->cmd->flags & (CMD_SKIP_MONITOR|CMD_ADMIN))) {
         robj **argv = c->original_argv ? c->original_argv : c->argv;
         int argc = c->original_argv ? c->original_argc : c->argc;
@@ -3639,14 +3746,17 @@ void call(client *c, int flags) {
 
     /* Clear the original argv.
      * If the client is blocked we will handle slowlog when it is unblocked. */
+    // 清空原始的参数数组，如果客户端被阻止，我们将在解除阻止时处理slowlog
     if (!(c->flags & CLIENT_BLOCKED))
         freeClientOriginalArgv(c);
 
     /* populate the per-command statistics that we show in INFO commandstats. */
+    // 填充我们在INFO commandstats中显示的每个命令的统计信息
     if (flags & CMD_CALL_STATS) {
         real_cmd->microseconds += duration;
         real_cmd->calls++;
         /* If the client is blocked we will handle latency stats when it is unblocked. */
+        // 如果客户端在阻塞中，我们将会在解除阻塞时处理延迟状态
         if (server.latency_tracking_enabled && !(c->flags & CLIENT_BLOCKED))
             updateCommandLatencyHistogram(&(real_cmd->latency_histogram), duration*1000);
     }
@@ -3655,6 +3765,9 @@ void call(client *c, int flags) {
      * We never propagate EXEC explicitly, it will be implicitly
      * propagated if needed (see propagatePendingCommands).
      * Also, module commands take care of themselves */
+    // 将命令传播到AOF和复制链接中。我们从不显式传播EXEC，如果需要，
+    // 它将隐式传播（请参阅propagatePendingCommands）。此外，模块命令会自行处理
+
     if (flags & CMD_CALL_PROPAGATE &&
         (c->flags & CLIENT_PREVENT_PROP) != CLIENT_PREVENT_PROP &&
         c->cmd->proc != execCommand &&
@@ -3664,16 +3777,19 @@ void call(client *c, int flags) {
 
         /* Check if the command operated changes in the data set. If so
          * set for replication / AOF propagation. */
+        // 检查命令操作的数据集是否发生变化。如果是，则为复制/AOF传播设置
         if (dirty) propagate_flags |= (PROPAGATE_AOF|PROPAGATE_REPL);
 
         /* If the client forced AOF / replication of the command, set
          * the flags regardless of the command effects on the data set. */
+        // 如果客户端强制AOF/复制命令，则无论命令对数据集的影响如何，都要设置标志。
         if (c->flags & CLIENT_FORCE_REPL) propagate_flags |= PROPAGATE_REPL;
         if (c->flags & CLIENT_FORCE_AOF) propagate_flags |= PROPAGATE_AOF;
 
         /* However prevent AOF / replication propagation if the command
          * implementation called preventCommandPropagation() or similar,
          * or if we don't have the call() flags to do so. */
+        // 但是，如果命令实现调用了preventCommandPropagation或类似命令，或者如果我们没有调用标志，则阻止AOF/复制传播。
         if (c->flags & CLIENT_PREVENT_REPL_PROP ||
             !(flags & CMD_CALL_PROPAGATE_REPL))
                 propagate_flags &= ~PROPAGATE_REPL;
@@ -3683,12 +3799,14 @@ void call(client *c, int flags) {
 
         /* Call alsoPropagate() only if at least one of AOF / replication
          * propagation is needed. */
+        // 仅当至少需要一种AOF/复制传播时，才调用alsoPropagate
         if (propagate_flags != PROPAGATE_NONE)
             alsoPropagate(c->db->id,c->argv,c->argc,propagate_flags);
     }
 
     /* Restore the old replication flags, since call() can be executed
      * recursively. */
+    // 恢复老的复制标志，因为调用能递归执行
     c->flags &= ~(CLIENT_FORCE_AOF|CLIENT_FORCE_REPL|CLIENT_PREVENT_PROP);
     c->flags |= client_old_flags &
         (CLIENT_FORCE_AOF|CLIENT_FORCE_REPL|CLIENT_PREVENT_PROP);
@@ -3697,6 +3815,8 @@ void call(client *c, int flags) {
      * make sure to remember the keys it fetched via this command. Scripting
      * works a bit differently, where if the scripts executes any read command, it
      * remembers all of the declared keys from the script. */
+    // 如果客户端为客户端缓存启用了键跟踪，请确保记住它通过此命令获取的key。脚本的工作有一点不同，
+    // 如果脚本执行任何读取命令，它会记住脚本中所有声明的键。
     if ((c->cmd->flags & CMD_READONLY) && (c->cmd->proc != evalRoCommand)
         && (c->cmd->proc != evalShaRoCommand) && (c->cmd->proc != fcallroCommand))
     {
@@ -3708,20 +3828,23 @@ void call(client *c, int flags) {
             trackingRememberKeys(caller);
         }
     }
-
+    // 增加服务器处理的命令数目
     server.stat_numcommands++;
 
     /* Record peak memory after each command and before the eviction that runs
      * before the next command. */
+    // 记录每个命令之后以及淘汰之前（下一个命令之前）峰值内存
     size_t zmalloc_used = zmalloc_used_memory();
     if (zmalloc_used > server.stat_peak_memory)
         server.stat_peak_memory = zmalloc_used;
 
     /* Do some maintenance job and cleanup */
+    // 做一些维护和清扫工作
     afterCommand(c);
 
     /* Client pause takes effect after a transaction has finished. This needs
      * to be located after everything is propagated. */
+    // 客户端暂停在事务完成后生效。这需要在传播完所有内容后进行定位
     if (!server.in_exec && server.client_pause_in_transaction) {
         server.client_pause_in_transaction = 0;
     }
@@ -3847,20 +3970,32 @@ uint64_t getCommandFlags(client *c) {
  *
  * If C_OK is returned the client is still alive and valid and
  * other operations can be performed by the caller. Otherwise
- * if C_ERR is returned the client was destroyed (i.e. after QUIT). */
+ * if C_ERR is returned the client was destroyed (i.e. after QUIT). 
+ * 
+ * 当我们已经读取了整个命令就会调用该函数，参数已经在客户端的argv/argc字段。
+ * processCommand执行该命令或者准备服务器从客户端读取块
+ * 
+ * 如果返回C_OK，则客户端仍处于活动状态且有效，调用方可以执行其他操作。
+ * 否则，如果返回C_ERR，则客户端被销毁（即在QUIT之后）
+ * */
 int processCommand(client *c) {
     if (!scriptIsTimedout()) {
         /* Both EXEC and scripts call call() directly so there should be
          * no way in_exec or scriptIsRunning() is 1.
          * That is unless lua_timedout, in which case client may run
          * some commands. */
+        // EXEC和脚本都直接调用call（），因此in_exec或scriptIsRunning（）不应为1。
+        // 除非lua_timedout，在这种情况下客户端可能会运行一些命令
         serverAssert(!server.in_exec);
         serverAssert(!scriptIsRunning());
     }
 
+    // 模块调用命令过滤器
     moduleCallCommandFilters(c);
 
     /* Handle possible security attacks. */
+    // 处理可能的安全攻击
+    // 如果是host或者post命令
     if (!strcasecmp(c->argv[0]->ptr,"host:") || !strcasecmp(c->argv[0]->ptr,"post")) {
         securityWarningCommand(c);
         return C_ERR;
@@ -3868,6 +4003,7 @@ int processCommand(client *c) {
 
     /* If we're inside a module blocked context yielding that wants to avoid
      * processing clients, postpone the command. */
+    // 如果我们在一个模块阻塞的上下文生成中，想要避免处理客户端，请推迟命令
     if (server.busy_module_yield_flags != BUSY_MODULE_YIELD_NONE &&
         !(server.busy_module_yield_flags & BUSY_MODULE_YIELD_CLIENTS))
     {
@@ -3878,19 +4014,24 @@ int processCommand(client *c) {
 
     /* Now lookup the command and check ASAP about trivial error conditions
      * such as wrong arity, bad command name and so forth. */
+    // 现在查找命令并尽快检查小的错误情况，比如参数数量作为，命令名字错误等
     c->cmd = c->lastcmd = c->realcmd = lookupCommand(c->argv,c->argc);
     sds err;
+    // 检查命令是否存在，如果存在，则返回1。不存在返回0，err里有详细的错误信息
     if (!commandCheckExistence(c, &err)) {
         rejectCommandSds(c, err);
         return C_OK;
     }
+    // 检查命令参数是否正确
     if (!commandCheckArity(c, &err)) {
         rejectCommandSds(c, err);
         return C_OK;
     }
 
     /* Check if the command is marked as protected and the relevant configuration allows it */
+    // 检查命令是否标记为受保护，并且相关配置允许
     if (c->cmd->flags & CMD_PROTECTED) {
+        // 检查调试命令和模块命令是否允许执行
         if ((c->cmd->proc == debugCommand && !allowProtectedAction(server.enable_debug_cmd, c)) ||
             (c->cmd->proc == moduleCommand && !allowProtectedAction(server.enable_module_cmd, c)))
         {
@@ -3906,22 +4047,31 @@ int processCommand(client *c) {
 
     uint64_t cmd_flags = getCommandFlags(c);
 
+    // 是否为读命令
     int is_read_command = (cmd_flags & CMD_READONLY) ||
                            (c->cmd->proc == execCommand && (c->mstate.cmd_flags & CMD_READONLY));
+    // 是否为写命令
     int is_write_command = (cmd_flags & CMD_WRITE) ||
                            (c->cmd->proc == execCommand && (c->mstate.cmd_flags & CMD_WRITE));
+    // 是否拒绝oom的命令
     int is_denyoom_command = (cmd_flags & CMD_DENYOOM) ||
                              (c->cmd->proc == execCommand && (c->mstate.cmd_flags & CMD_DENYOOM));
+    // 是否拒绝stale命令
     int is_denystale_command = !(cmd_flags & CMD_STALE) ||
                                (c->cmd->proc == execCommand && (c->mstate.cmd_inv_flags & CMD_STALE));
+    // 是否拒绝loading的命令
     int is_denyloading_command = !(cmd_flags & CMD_LOADING) ||
                                  (c->cmd->proc == execCommand && (c->mstate.cmd_inv_flags & CMD_LOADING));
+    // 复制命令
     int is_may_replicate_command = (cmd_flags & (CMD_WRITE | CMD_MAY_REPLICATE)) ||
                                    (c->cmd->proc == execCommand && (c->mstate.cmd_flags & (CMD_WRITE | CMD_MAY_REPLICATE)));
+    // 拒绝异步加载命令
     int is_deny_async_loading_command = (cmd_flags & CMD_NO_ASYNC_LOADING) ||
                                         (c->cmd->proc == execCommand && (c->mstate.cmd_flags & CMD_NO_ASYNC_LOADING));
+    // 是否为必须服从的客户端
     int obey_client = mustObeyClient(c);
 
+    // 身份验证
     if (authRequired(c)) {
         /* AUTH and HELLO and no auth commands are valid even in
          * non-authenticated state. */
@@ -3931,6 +4081,7 @@ int processCommand(client *c) {
         }
     }
 
+    // 客户端处于一个事务上下文中，但是命令不是
     if (c->flags & CLIENT_MULTI && c->cmd->flags & CMD_NO_MULTI) {
         rejectCommandFormat(c,"Command not allowed inside a transaction");
         return C_OK;
@@ -3938,6 +4089,7 @@ int processCommand(client *c) {
 
     /* Check if the user can run this command according to the current
      * ACLs. */
+    // 根据当前的访问控制列表检查用户是否可以运行该命令
     int acl_errpos;
     int acl_retval = ACLCheckAllPerm(c,&acl_errpos);
     if (acl_retval != ACL_OK) {
@@ -3951,7 +4103,11 @@ int processCommand(client *c) {
     /* If cluster is enabled perform the cluster redirection here.
      * However we don't perform the redirection if:
      * 1) The sender of this command is our master.
-     * 2) The command has no key arguments. */
+     * 2) The command has no key arguments. 
+     * 如果已启用群集，请在此处执行群集重定向。但是，如果出现以下情况，我们不会执行重定向：
+     * 1）此命令的发件人是我们的主人
+     * 2）命令没有关键参数
+     * */
     if (server.cluster_enabled &&
         !mustObeyClient(c) &&
         !(!(c->cmd->flags&CMD_MOVABLE_KEYS) && c->cmd->key_specs_num == 0 &&
@@ -3975,6 +4131,8 @@ int processCommand(client *c) {
     /* Disconnect some clients if total clients memory is too high. We do this
      * before key eviction, after the last command was executed and consumed
      * some client output buffer memory. */
+    // 如果客户端内存总量过高，请断开某些客户端的连接。
+    // 我们在执行最后一个命令并消耗一些客户端输出缓冲区内存之后，在key淘汰之前执行此操作
     evictClients();
     if (server.current_client == NULL) {
         /* If we evicted ourself then abort processing the command */
@@ -3987,6 +4145,9 @@ int processCommand(client *c) {
      * the event loop since there is a busy Lua script running in timeout
      * condition, to avoid mixing the propagation of scripts with the
      * propagation of DELs due to eviction. */
+    // 处理maxmemory指令。
+    // 请注意，如果我们在这里重新进入事件循环，我们不想回收内存，因为有一个繁忙的Lua脚本在超时条件下运行，
+    // 以避免由于淘汰而将脚本的传播与DEL的传播混合在一起。
     if (server.maxmemory && !isInsideYieldingLongCommand()) {
         int out_of_memory = (performEvictions() == EVICT_FAIL);
 
@@ -3994,10 +4155,14 @@ int processCommand(client *c) {
          * invalidation keys. If we don't do this, we may get an invalidation
          * message after we perform operation on the key, where in fact this
          * message belongs to the old value of the key before it gets evicted.*/
+        // performEvictions可能会淘汰keys，因此我们需要刷新挂起的跟踪无效密钥。
+        // 如果我们不这样做，在对密钥执行操作后，我们可能会收到一条无效消息，
+        // 事实上，该消息属于淘汰之前的老的值。
         trackingHandlePendingKeyInvalidations();
 
         /* performEvictions may flush slave output buffers. This may result
          * in a slave, that may be the active client, to be freed. */
+        // performEvictions可能会冲刷从节点的输出buffer，这可能会导致从节点（可能是一个活动的客户端）被释放
         if (server.current_client == NULL) return C_ERR;
 
         int reject_cmd_on_oom = is_denyoom_command;
@@ -4006,6 +4171,8 @@ int processCommand(client *c) {
          * However, we never want to reject DISCARD, or even EXEC (unless it
          * contains denied commands, in which case is_denyoom_command is already
          * set. */
+        // 如果客户端处于MULTI/EXEC上下文中，则排队可能会消耗无限量的内存，因此我们希望停止这种情况。
+        // 但是，我们从不希望拒绝DISCARD，甚至EXEC（除非它包含被拒绝的命令，在这种情况下，is_denyoom_command已被设置）。
         if (c->flags & CLIENT_MULTI &&
             c->cmd->proc != execCommand &&
             c->cmd->proc != discardCommand &&
@@ -4014,6 +4181,7 @@ int processCommand(client *c) {
             reject_cmd_on_oom = 1;
         }
 
+        // 如果内存不足并且是可以在内存不足拒绝执行的命令，就拒绝，然后返回
         if (out_of_memory && reject_cmd_on_oom) {
             rejectCommand(c, shared.oomerr);
             return C_OK;
@@ -4024,20 +4192,27 @@ int processCommand(client *c) {
          * arguments might interfere. We need to save it for EXEC and module
          * calls too, since these can call EVAL, but avoid saving it during an
          * interrupted / yielding busy script / module. */
+        // 在命令启动时保存out_of_memory结果，否则，如果我们在脚本中的第一次写入中检查OOM，
+        // lua堆栈和参数使用的内存可能会干扰。我们也需要为EXEC和模块调用保存它，因为这些调用可以调用EVAL，但要避免在脚本/模块中断/繁忙时保存它。
         server.pre_command_oom_state = out_of_memory;
     }
 
     /* Make sure to use a reasonable amount of memory for client side
      * caching metadata. */
+    // 确保使用合理数量的内存用于客户端缓存元数据。
     if (server.tracking_clients) trackingLimitUsedSlots();
 
     /* Don't accept write commands if there are problems persisting on disk
      * unless coming from our master, in which case check the replica ignore
      * disk write error config to either log or crash. */
+    // 除非是从主节点来的命令，否则如果在持久化期间有问题时，不接受写入命令，这种情况下验证复制，
+    // 忽略磁盘写入错误并写入日志或者崩溃。
     int deny_write_type = writeCommandsDeniedByDiskError();
+    // 如果不能接受写入
     if (deny_write_type != DISK_ERROR_TYPE_NONE &&
         (is_write_command || c->cmd->proc == pingCommand))
     {
+        // 客户端是服从状态
         if (obey_client) {
             if (!server.repl_ignore_disk_write_error && c->cmd->proc != pingCommand) {
                 serverPanic("Replica was unable to write command to disk.");
@@ -4053,6 +4228,7 @@ int processCommand(client *c) {
         } else {
             sds err = writeCommandsGetDiskErrorMessage(deny_write_type);
             /* remove the newline since rejectCommandSds adds it. */
+            // 删除rejectCommandSds添加的新行
             sdssubstr(err, 0, sdslen(err)-2);
             rejectCommandSds(c, err);
             return C_OK;
@@ -4061,6 +4237,7 @@ int processCommand(client *c) {
 
     /* Don't accept write commands if there are not enough good slaves and
      * user configured the min-slaves-to-write option. */
+    // 如果没有足够好的从节点状态并且用户配置了min-slaves-to-write选项，则不接受写入命令
     if (is_write_command && !checkGoodReplicasStatus()) {
         rejectCommand(c, shared.noreplicaserr);
         return C_OK;
@@ -4068,6 +4245,7 @@ int processCommand(client *c) {
 
     /* Don't accept write commands if this is a read only slave. But
      * accept write commands if this is our master. */
+    // 如果这是一个只读的从节点，请不要接受写命令。但如果这是我们的主节点，就接受写命令
     if (server.masterhost && server.repl_slave_ro &&
         !obey_client &&
         is_write_command)
@@ -4078,6 +4256,7 @@ int processCommand(client *c) {
 
     /* Only allow a subset of commands in the context of Pub/Sub if the
      * connection is in RESP2 mode. With RESP3 there are no limits. */
+    // 如果连接处于RESP2模式，则仅允许发布/订阅上下文中的命令子集。RESP3则没有限制
     if ((c->flags & CLIENT_PUBSUB && c->resp == 2) &&
         c->cmd->proc != pingCommand &&
         c->cmd->proc != subscribeCommand &&
@@ -4098,6 +4277,8 @@ int processCommand(client *c) {
     /* Only allow commands with flag "t", such as INFO, REPLICAOF and so on,
      * when replica-serve-stale-data is no and we are a replica with a broken
      * link with master. */
+    // 当replica-serve-stale-data为no时并且我们是一个与主节点已经失去联系的复制节点时，
+    // 只允许执行标志为t的命令，比如INFO，REPLICAOF等等。
     if (server.masterhost && server.repl_state != REPL_STATE_CONNECTED &&
         server.repl_serve_stale_data == 0 &&
         is_denystale_command)
@@ -4108,12 +4289,14 @@ int processCommand(client *c) {
 
     /* Loading DB? Return an error if the command has not the
      * CMD_LOADING flag. */
+    // 数据库正在加载中，如果命令没有CMD_LOADING标志就返回错误
     if (server.loading && !server.async_loading && is_denyloading_command) {
         rejectCommand(c, shared.loadingerr);
         return C_OK;
     }
 
     /* During async-loading, block certain commands. */
+    // 在异步加载中，阻塞某些命令
     if (server.async_loading && is_deny_async_loading_command) {
         rejectCommand(c,shared.loadingerr);
         return C_OK;
@@ -4126,6 +4309,9 @@ int processCommand(client *c) {
      * the MULTI plus a few initial commands refused, then the timeout
      * condition resolves, and the bottom-half of the transaction gets
      * executed, see Github PR #7022. */
+    // 当繁忙的工作正在完成时（脚本/模块）只允许有限数量的命令。
+    // 请注意，我们需要允许事务命令，否则客户端在没有错误检查的情况下通过流水线发送事务，
+    // 可能会拒绝MULTI加上一些初始命令，然后超时条件解决，事务的下半部分得到执行，请参阅Github PR#7022。
     if (isInsideYieldingLongCommand() && !(c->cmd->flags & CMD_ALLOW_BUSY)) {
         if (server.busy_module_yield_flags && server.busy_module_yield_reply) {
             rejectCommandFormat(c, "-BUSY %s", server.busy_module_yield_reply);
@@ -4142,6 +4328,7 @@ int processCommand(client *c) {
     /* Prevent a replica from sending commands that access the keyspace.
      * The main objective here is to prevent abuse of client pause check
      * from which replicas are exempt. */
+    // 阻止副本发送访问key空间的命令。这里的主要目标是防止滥用客户端暂停检查，其中的副本客户端可以免于此检查。
     if ((c->flags & CLIENT_SLAVE) && (is_may_replicate_command || is_write_command || is_read_command)) {
         rejectCommandFormat(c, "Replica can't interact with the keyspace");
         return C_OK;
@@ -4149,6 +4336,7 @@ int processCommand(client *c) {
 
     /* If the server is paused, block the client until
      * the pause has ended. Replicas are never paused. */
+    // 如果服务器处于暂停状态，阻塞客户端直到暂停结束，复制节点从不暂停
     if (!(c->flags & CLIENT_SLAVE) && 
         ((isPausedActions(PAUSE_ACTION_CLIENT_ALL)) ||
         ((isPausedActions(PAUSE_ACTION_CLIENT_WRITE)) && is_may_replicate_command)))
@@ -4159,6 +4347,7 @@ int processCommand(client *c) {
     }
 
     /* Exec the command */
+    // 执行命令
     if (c->flags & CLIENT_MULTI &&
         c->cmd->proc != execCommand &&
         c->cmd->proc != discardCommand &&
@@ -4167,6 +4356,7 @@ int processCommand(client *c) {
         c->cmd->proc != quitCommand &&
         c->cmd->proc != resetCommand)
     {
+        // 加入事务命令列表
         queueMultiCommand(c, cmd_flags);
         addReply(c,shared.queued);
     } else {

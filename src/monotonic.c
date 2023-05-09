@@ -154,7 +154,7 @@ static void monotonicInit_posix() {
 }
 
 
-
+// 初始化时钟
 const char * monotonicInit() {
     #if defined(USE_PROCESSOR_CLOCK) && defined(__x86_64__) && defined(__linux__)
     if (getMonotonicUs == NULL) monotonicInit_x86linux();

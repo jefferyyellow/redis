@@ -32,6 +32,7 @@
 /* ================================ MULTI/EXEC ============================== */
 
 /* Client state initialization for MULTI/EXEC */
+// MULTI/EXEC的客户端状态初始化
 void initClientMultiState(client *c) {
     c->mstate.commands = NULL;
     c->mstate.count = 0;
@@ -57,6 +58,7 @@ void freeClientMultiState(client *c) {
 }
 
 /* Add a new command into the MULTI commands queue */
+// 增加一个新的命令到MULTI命令队列
 void queueMultiCommand(client *c, uint64_t cmd_flags) {
     multiCmd *mc;
 
@@ -64,24 +66,32 @@ void queueMultiCommand(client *c, uint64_t cmd_flags) {
      * this is useful in case client sends these in a pipeline, or doesn't
      * bother to read previous responses and didn't notice the multi was already
      * aborted. */
+    // 如果事务已经中止，那么浪费内存是没有意义的。如果客户端在管道中发送这些响应，
+    // 或者不需要读取以前的响应，也没有注意到multi已经中止，那么这将非常有用。
     if (c->flags & (CLIENT_DIRTY_CAS|CLIENT_DIRTY_EXEC))
         return;
+
+    // 还没有命令数量
     if (c->mstate.count == 0) {
         /* If a client is using multi/exec, assuming it is used to execute at least
          * two commands. Hence, creating by default size of 2. */
+        // 如果客户端使用multi/exec，假设它用于执行至少两个命令。因此，创建默认大小2
         c->mstate.commands = zmalloc(sizeof(multiCmd)*2);
         c->mstate.alloc_count = 2;
     }
+    // 如果没有空间，需要分配空间
     if (c->mstate.count == c->mstate.alloc_count) {
         c->mstate.alloc_count = c->mstate.alloc_count < INT_MAX/2 ? c->mstate.alloc_count*2 : INT_MAX;
         c->mstate.commands = zrealloc(c->mstate.commands, sizeof(multiCmd)*(c->mstate.alloc_count));
     }
+    // 增加到末尾
     mc = c->mstate.commands+c->mstate.count;
     mc->cmd = c->cmd;
     mc->argc = c->argc;
     mc->argv = c->argv;
     mc->argv_len = c->argv_len;
 
+    // 增加命令的数量
     c->mstate.count++;
     c->mstate.cmd_flags |= cmd_flags;
     c->mstate.cmd_inv_flags |= ~cmd_flags;
@@ -89,6 +99,7 @@ void queueMultiCommand(client *c, uint64_t cmd_flags) {
 
     /* Reset the client's args since we copied them into the mstate and shouldn't
      * reference them from c anymore. */
+    // 重置客户端的args，因为我们将它们复制到了mstate中，并且不应该再从c中引用它们
     c->argv = NULL;
     c->argc = 0;
     c->argv_len_sum = 0;

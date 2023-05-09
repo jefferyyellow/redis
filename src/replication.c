@@ -197,6 +197,7 @@ void rebaseReplicationBuffer(long long base_repl_offset) {
     }
 }
 
+// 重置复制缓冲区
 void resetReplicationBuffer(void) {
     server.repl_buffer_mem = 0;
     server.repl_buffer_blocks = listCreate();

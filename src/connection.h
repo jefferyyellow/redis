@@ -129,7 +129,9 @@ struct connection {
 struct connListener {
     int fd[CONFIG_BINDADDR_MAX];
     int count;
+    // 绑定地址的数组
     char **bindaddr;
+    // 绑定地址的数目
     int bindaddr_count;
     int port;
     ConnectionType *ct;
