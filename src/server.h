@@ -703,10 +703,15 @@ typedef enum {
 // redis对象，这些类型能保存一个string/list和/set
 /* The actual Redis Object */
 // 实际的Redis对象
+// 字符串对象
 #define OBJ_STRING 0    /* String object. */
+// 列表对象
 #define OBJ_LIST 1      /* List object. */
+// 集合对象
 #define OBJ_SET 2       /* Set object. */
+// 有序列表对象
 #define OBJ_ZSET 3      /* Sorted set object. */
+// 散列表对象
 #define OBJ_HASH 4      /* Hash object. */
 
 /* The "module" object type is a special one that signals that the object
@@ -720,7 +725,9 @@ typedef enum {
  * by a 64 bit module type ID, which has a 54 bits module-specific signature
  * in order to dispatch the loading to the right module, plus a 10 bits
  * encoding version. */
+// 模块对象
 #define OBJ_MODULE 5    /* Module object. */
+// 流对象
 #define OBJ_STREAM 6    /* Stream object. */
 
 /* Extract encver / signature from a module type ID. */
@@ -906,6 +913,7 @@ struct RedisModuleDigest {
 // 分配在栈上的对象
 #define OBJ_STATIC_REFCOUNT (INT_MAX-1) /* Object allocated in the stack. */
 #define OBJ_FIRST_SPECIAL_REFCOUNT OBJ_STATIC_REFCOUNT
+// Redis对象，根据type的不同可以分为字符串对象、列表对象、集合对象、有序集合对象、散列表对象、模块对象和流对象
 struct redisObject {
     // 类型
     unsigned type:4;
@@ -986,7 +994,7 @@ typedef struct redisDb {
     // 用于过期键的字典（底层实现为哈希表），用于实现键的TTL功能；
     dict *expires;              /* Timeout of keys with a timeout set */
     // 使用命令BLPOP阻塞获取列表元素时，如果链表为空，会阻塞客户端，同时将此列表键记录在blocking_keys；
-    // 用于阻塞操作的键的字典
+    // 处于阻塞状态的键和对应的client
     dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/
     dict *blocking_keys_unblock_on_nokey;   /* Keys with clients waiting for
                                              * data, and should be unblocked if key is deleted (XREADEDGROUP).
@@ -1002,11 +1010,12 @@ typedef struct redisDb {
     dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
     // 数据库ID
     int id;                     /* Database ID */
-    // 存储数据库对象的评价TTL(Time To Live)，用于统计
+    // 平均生存时间，存储数据库对象的评价TTL(Time To Live)，用于统计
     long long avg_ttl;          /* Average TTL, just for stats */
     // 游标，用于在过期键字典中定期地删除过期键；
     unsigned long expires_cursor; /* Cursor of the active expire cycle. */
     // 等待进行碎片整理操作的键的列表；
+    // 逐渐尝试逐个碎片整理的key列表
     list *defrag_later;         /* List of key names to attempt to defrag one by one, gradually. */
     // 用于保存槽和键之间映射关系的字典（用于 Redis 集群）
     clusterSlotToKeyMapping *slots_to_keys; /* Array of slots to keys. Only used in cluster mode (db 0). */
@@ -1806,6 +1815,7 @@ struct redisServer {
     double stat_module_progress;   /* Module save progress. */
     size_t stat_clients_type_memory[CLIENT_TYPE_COUNT];/* Mem usage by type */
     size_t stat_cluster_links_memory; /* Mem usage by cluster links */
+    // 预料之外的错误回复数目（AOF加载，从从节点到主节点等等）错误复制
     long long stat_unexpected_error_replies; /* Number of unexpected (aof-loading, replica to master, etc.) error replies */
     // 发出的错误回复总数(命令错误 + 拒绝错误)
     long long stat_total_error_replies; /* Total number of issued error replies ( command + rejected errors ) */

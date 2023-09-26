@@ -1349,7 +1349,7 @@ unsigned char *ziplistMerge(unsigned char **first, unsigned char **second) {
          *   [SOURCE - END, TARGET - HEADER] */
         // 将目标压缩表移动到新的压缩表的后部
         memmove(target + source_bytes - ZIPLIST_END_SIZE,
-                target + ZIPLIST_HEADER_SIZE,0
+                target + ZIPLIST_HEADER_SIZE,
                 target_bytes - ZIPLIST_HEADER_SIZE);
         // 拷贝进前面
         memcpy(target, source, source_bytes - ZIPLIST_END_SIZE);

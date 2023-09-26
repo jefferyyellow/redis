@@ -561,19 +561,25 @@ void afterErrorReply(client *c, const char *s, size_t len, int flags) {
 
     if (!(flags & ERR_REPLY_FLAG_NO_STATS_UPDATE)) {
         /* Increment the global error counter */
+        // 增加全局错误计数
         server.stat_total_error_replies++;
         /* Increment the error stats
          * If the string already starts with "-..." then the error prefix
          * is provided by the caller ( we limit the search to 32 chars). Otherwise we use "-ERR". */
+        // 增加错误统计，如果字符串已经以“-…”开头，那么错误前缀由调用方提供（我们将搜索限制为32个字符）。
+        // 否则，我们将使用“-ERR”
         if (s[0] != '-') {
+            // 增加ERR的错误计数
             incrementErrorCount("ERR", 3);
         } else {
+            // 在最大32个字符的地方查找空格，找到就用空格之前的字符串记录错误数
             char *spaceloc = memchr(s, ' ', len < 32 ? len : 32);
             if (spaceloc) {
                 const size_t errEndPos = (size_t)(spaceloc - s);
                 incrementErrorCount(s+1, errEndPos-1);
             } else {
                 /* Fallback to ERR if we can't retrieve the error prefix */
+                // 如果没有找到错误前缀，就直接使用ERR记录
                 incrementErrorCount("ERR", 3);
             }
         }
@@ -582,6 +588,8 @@ void afterErrorReply(client *c, const char *s, size_t len, int flags) {
          * the cmd stats will not be updated as well, we still want this command
          * to be counted as failed so we update it here. We update c->realcmd in
          * case c->cmd was changed (like in GEOADD). */
+        // stat_total_error_replies 不会更新，意味着命令的状态也不会更新，我们仍然希望这个命令被视为失败，
+        // 所以我们在这里更新它。如果更改了c->cmd，我们会更新c->realcmd（就像在GEOADD中一样）
         c->realcmd->failed_calls++;
     }
 
@@ -589,13 +597,19 @@ void afterErrorReply(client *c, const char *s, size_t len, int flags) {
      * an error and this function gets called. Actually the error will never
      * be sent because addReply*() against master clients has no effect...
      * A notable example is:
+     * 有时，从机向主机回复错误并调用此函数可能是正常的。实际上，错误永远不会被发送，因为针对主客户端的addReply*（）
+     * 没有效果。。。一个值得注意的例子是：
      *
      *    EVAL 'redis.call("incr",KEYS[1]); redis.call("nonexisting")' 1 x
      *
      * Where the master must propagate the first change even if the second
      * will produce an error. However it is useful to log such events since
-     * they are rare and may hint at errors in a script or a bug in Redis. */
+     * they are rare and may hint at errors in a script or a bug in Redis. 
+     * 其中主控器必须传播第一个更改，即使第二个更改会产生错误。然而，记录这样的事件是很有用的，
+     * 因为它们很罕见，可能会提示脚本中的错误或Redis中的错误。
+     * */
     int ctype = getClientType(c);
+    // 如果客户端是主节点，或者从节点，或者AOF节点
     if (ctype == CLIENT_TYPE_MASTER || ctype == CLIENT_TYPE_SLAVE || c->id == CLIENT_ID_AOF) {
         char *to, *from;
 
@@ -612,6 +626,7 @@ void afterErrorReply(client *c, const char *s, size_t len, int flags) {
 
         if (len > 4096) len = 4096;
         sds cmdname = c->lastcmd ? c->lastcmd->fullname : NULL;
+        // 服务器日志
         serverLog(LL_WARNING,"== CRITICAL == This %s is sending an error "
                              "to its %s: '%.*s' after processing the command "
                              "'%s'", from, to, (int)len, s, cmdname ? cmdname : "<unknown>");
@@ -620,6 +635,7 @@ void afterErrorReply(client *c, const char *s, size_t len, int flags) {
         {
             showLatestBacklog();
         }
+        // 增加意料之外的错误复制
         server.stat_unexpected_error_replies++;
 
         /* Based off the propagation error behavior, check if we need to panic here. There

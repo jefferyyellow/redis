@@ -602,6 +602,9 @@ int parseExtendedExpireArgumentsOrReply(client *c, int *flags) {
  * the argv[2] parameter. The basetime is always specified in milliseconds.
  *
  * Additional flags are supported and parsed via parseExtendedExpireArguments */
+
+// 这是EXPIRE,PEXPIRE,EXPIREAT和PEXPIREAT的通用命令实现。因为第二个参数可能是相对的或者上绝对的，
+// basetime参数用于基于什么时间（基于0用于AT结尾的命令，相对的过期时间就是基于当前时间）
 void expireGenericCommand(client *c, long long basetime, int unit) {
     robj *key = c->argv[1], *param = c->argv[2];
     long long when; /* unix time in milliseconds when the key will expire. */
@@ -609,16 +612,20 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
     int flag = 0;
 
     /* checking optional flags */
+    // 检查选项标志
     if (parseExtendedExpireArgumentsOrReply(c, &flag) != C_OK) {
         return;
     }
 
+    // 得到传入的时间相关的参数
     if (getLongLongFromObjectOrReply(c, param, &when, NULL) != C_OK)
         return;
 
     /* EXPIRE allows negative numbers, but we can at least detect an
      * overflow by either unit conversion or basetime addition. */
+    // EXPIRE允许负数,但我们至少可以通过单位转换或basetime加法检测溢出
     if (unit == UNIT_SECONDS) {
+        // 检测溢出
         if (when > LLONG_MAX / 1000 || when < LLONG_MIN / 1000) {
             addReplyErrorExpireTime(c);
             return;
@@ -626,22 +633,28 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
         when *= 1000;
     }
 
+    // when时间太大
     if (when > LLONG_MAX - basetime) {
         addReplyErrorExpireTime(c);
         return;
     }
+    // 得到最终时间
     when += basetime;
 
     /* No key, return zero. */
+    // 没有对应的键值，返回0
     if (lookupKeyWrite(c->db,key) == NULL) {
         addReply(c,shared.czero);
         return;
     }
 
+    // 设置了标志
     if (flag) {
+        // 得到目前的过期时间
         current_expire = getExpire(c->db, key);
 
         /* NX option is set, check current expiry */
+        // 如果NX选项被设置，如果以前设置过过期时间，就返回0
         if (flag & EXPIRE_NX) {
             if (current_expire != -1) {
                 addReply(c,shared.czero);
@@ -650,6 +663,7 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
         }
 
         /* XX option is set, check current expiry */
+        // 如果XX选项被设置，如果以前没有设置过过期时间，就返回0
         if (flag & EXPIRE_XX) {
             if (current_expire == -1) {
                 /* reply 0 when the key has no expiry */
@@ -659,6 +673,7 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
         }
 
         /* GT option is set, check current expiry */
+        // 如果GT选项设置，如果设置的时间比当前的还小，或者以前本来没有过期时间，返回0
         if (flag & EXPIRE_GT) {
             /* When current_expire is -1, we consider it as infinite TTL,
              * so expire command with gt always fail the GT. */
@@ -670,6 +685,7 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
         }
 
         /* LT option is set, check current expiry */
+        // 如果LT选项设置了，如果设置的时间比当前的过期时间还大，返回0
         if (flag & EXPIRE_LT) {
             /* When current_expire -1, we consider it as infinite TTL,
              * but 'when' can still be negative at this point, so if there is
@@ -682,14 +698,17 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
         }
     }
 
+    // 如果过期时间以及到了
     if (checkAlreadyExpired(when)) {
         robj *aux;
-
+        // 删除
         int deleted = dbGenericDelete(c->db,key,server.lazyfree_lazy_expire,DB_FLAG_KEY_EXPIRED);
         serverAssertWithInfo(c,key,deleted);
+        // 增加脏键的数量
         server.dirty++;
 
         /* Replicate/AOF this as an explicit DEL or UNLINK. */
+        // 以一个显式的DEL或者UNLINK复制Relicate/AOF
         aux = server.lazyfree_lazy_expire ? shared.unlink : shared.del;
         rewriteClientCommandVector(c,2,aux,key);
         signalModifiedKey(c,c->db,key);
@@ -697,6 +716,7 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
         addReply(c, shared.cone);
         return;
     } else {
+        // 向redisdb的expires字典里添加键值对
         setExpire(c,c->db,key,when);
         addReply(c,shared.cone);
         /* Propagate as PEXPIREAT millisecond-timestamp
@@ -711,9 +731,11 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
             rewriteClientCommandArgument(c,2,when_obj);
             decrRefCount(when_obj);
         }
-
+        // 修改键的信号
         signalModifiedKey(c,c->db,key);
+        // 通知键空间的事件
         notifyKeyspaceEvent(NOTIFY_GENERIC,"expire",key,c->db->id);
+        // 增加脏键数量
         server.dirty++;
         return;
     }
@@ -740,10 +762,12 @@ void pexpireatCommand(client *c) {
 }
 
 /* Implements TTL, PTTL, EXPIRETIME and PEXPIRETIME */
+// 实现TTL，PTTL，EXPIRETIME和PEXPIRETIME
 void ttlGenericCommand(client *c, int output_ms, int output_abs) {
     long long expire, ttl = -1;
 
     /* If the key does not exist at all, return -2 */
+    // 如果键压根就不存在，返回-2
     if (lookupKeyReadWithFlags(c->db,c->argv[1],LOOKUP_NOTOUCH) == NULL) {
         addReplyLongLong(c,-2);
         return;
@@ -751,14 +775,18 @@ void ttlGenericCommand(client *c, int output_ms, int output_abs) {
 
     /* The key exists. Return -1 if it has no expire, or the actual
      * TTL value otherwise. */
+    // 如果键存储，但是没有过期时间，就返回-1，或者返回真正的TTL值
     expire = getExpire(c->db,c->argv[1]);
     if (expire != -1) {
+        // 计算时间
         ttl = output_abs ? expire : expire-commandTimeSnapshot();
         if (ttl < 0) ttl = 0;
     }
+    // 没有设置过期时间，就返回-1
     if (ttl == -1) {
         addReplyLongLong(c,-1);
     } else {
+        // 如果输出为ms，那就进行四舍五入
         addReplyLongLong(c,output_ms ? ttl : ((ttl+500)/1000));
     }
 }
@@ -784,10 +812,15 @@ void pexpiretimeCommand(client *c) {
 }
 
 /* PERSIST key */
+// persist命令
 void persistCommand(client *c) {
+    // 为写操作查找key的对象
     if (lookupKeyWrite(c->db,c->argv[1])) {
+        // 从过期字典里删除key的过期时间
         if (removeExpire(c->db,c->argv[1])) {
+            // 调用键修改的钩子函数
             signalModifiedKey(c,c->db,c->argv[1]);
+            // 通知键空间事件
             notifyKeyspaceEvent(NOTIFY_GENERIC,"persist",c->argv[1],c->db->id);
             addReply(c,shared.cone);
             server.dirty++;

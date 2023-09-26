@@ -288,7 +288,9 @@ unsigned long LFUGetTimeInMinutes(void) {
  * that elapsed since the last access. Handle overflow (ldt greater than
  * the current 16 bits minutes time) considering the time as wrapping
  * exactly once. */
+// 得到一个对象从上一次访问时间到现在过去的分钟数
 unsigned long LFUTimeElapsed(unsigned long ldt) {
+    // 得到流逝时间的分钟数，最大65535
     unsigned long now = LFUGetTimeInMinutes();
     if (now >= ldt) return now-ldt;
     return 65535-ldt+now;
@@ -296,11 +298,13 @@ unsigned long LFUTimeElapsed(unsigned long ldt) {
 
 /* Logarithmically increment a counter. The greater is the current counter value
  * the less likely is that it gets really incremented. Saturate it at 255. */
+// 增加访问频率
 uint8_t LFULogIncr(uint8_t counter) {
     if (counter == 255) return 255;
     double r = (double)rand()/RAND_MAX;
     double baseval = counter - LFU_INIT_VAL;
     if (baseval < 0) baseval = 0;
+    // 访问频率算法，lfu_log_factor为可配置的概率因子，默认为10
     double p = 1.0/(baseval*server.lfu_log_factor+1);
     if (r < p) counter++;
     return counter;

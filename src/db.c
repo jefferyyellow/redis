@@ -87,6 +87,7 @@ void updateLFU(robj *val) {
  * Even if the key expiry is master-driven, we can correctly report a key is
  * expired on replicas even if the master is lagging expiring our key via DELs
  * in the replication link. */
+// 在指定的DB中为读取操作查找一个键，如果键不存在就返回NULL
 robj *lookupKey(redisDb *db, robj *key, int flags) {
     dictEntry *de = dictFind(db->dict,key->ptr);
     robj *val = NULL;
@@ -147,7 +148,9 @@ robj *lookupKey(redisDb *db, robj *key, int flags) {
  * This function is equivalent to lookupKey(). The point of using this function
  * rather than lookupKey() directly is to indicate that the purpose is to read
  * the key. */
+// 在指定的DB中为读取操作查找一个键，如果键不存在就返回NULL
 robj *lookupKeyReadWithFlags(redisDb *db, robj *key, int flags) {
+    // 不能说写入操作
     serverAssert(!(flags & LOOKUP_WRITE));
     return lookupKey(db, key, flags);
 }
@@ -576,15 +579,19 @@ long long dbTotalServerKeyCount() {
 
 /*-----------------------------------------------------------------------------
  * Hooks for key space changes.
- *
+ * 键空间修改的钩子函数
+ * 
  * Every time a key in the database is modified the function
  * signalModifiedKey() is called.
- *
+ * 每次修改数据库中的键时，都会调用函数signalModifiedKey 
+ * 
  * Every time a DB is flushed the function signalFlushDb() is called.
+ * 每次刷新数据库时，都会调用函数signalFlushDb 
  *----------------------------------------------------------------------------*/
 
 /* Note that the 'c' argument may be NULL if the key was modified out of
  * a context of a client. */
+// 请注意，如果密钥是在客户端上下文之外修改的，则“c”参数可能为NULL 
 void signalModifiedKey(client *c, redisDb *db, robj *key) {
     touchWatchedKey(db,key);
     trackingInvalidateKey(c,key,1);
@@ -1067,6 +1074,7 @@ void lastsaveCommand(client *c) {
     addReplyLongLong(c,server.lastsave);
 }
 
+// 得到对象类型的名字
 char* getObjectTypeName(robj *o) {
     char* type;
     if (o == NULL) {
@@ -1078,7 +1086,9 @@ char* getObjectTypeName(robj *o) {
         case OBJ_SET: type = "set"; break;
         case OBJ_ZSET: type = "zset"; break;
         case OBJ_HASH: type = "hash"; break;
+        // 流
         case OBJ_STREAM: type = "stream"; break;
+        // 模块
         case OBJ_MODULE: {
             moduleValue *mv = o->ptr;
             type = mv->type->name;
@@ -1089,6 +1099,7 @@ char* getObjectTypeName(robj *o) {
     return type;
 }
 
+// type命令
 void typeCommand(client *c) {
     robj *o;
     o = lookupKeyReadWithFlags(c->db,c->argv[1],LOOKUP_NOTOUCH);
@@ -1156,6 +1167,7 @@ void shutdownCommand(client *c) {
      * failed (the client has received an error). */
 }
 
+// 重命名键
 void renameGenericCommand(client *c, int nx) {
     robj *o;
     long long expire;
@@ -1163,6 +1175,8 @@ void renameGenericCommand(client *c, int nx) {
 
     /* When source and dest key is the same, no operation is performed,
      * if the key exists, however we still return an error on unexisting key. */
+    // 如果原来的名字和修改的名字是一样的，如果键存在，没有任何操作需要执行，
+    // 如果键不存在，还是需要返回错误
     if (sdscmp(c->argv[1]->ptr,c->argv[2]->ptr) == 0) samekey = 1;
 
     if ((o = lookupKeyWriteOrReply(c,c->argv[1],shared.nokeyerr)) == NULL)
@@ -1174,8 +1188,11 @@ void renameGenericCommand(client *c, int nx) {
     }
 
     incrRefCount(o);
+    // 将key的过期时间保存到expire变量
     expire = getExpire(c->db,c->argv[1]);
+    // 查询新的键名是否存在
     if (lookupKeyWrite(c->db,c->argv[2]) != NULL) {
+        // 如果是renamenx命令则不操作，直接返回0
         if (nx) {
             decrRefCount(o);
             addReply(c,shared.czero);
@@ -1183,13 +1200,19 @@ void renameGenericCommand(client *c, int nx) {
         }
         /* Overwrite: delete the old key before creating the new one
          * with the same name. */
+        // 覆盖：在创建新的键之前删除老的键删除
         dbDelete(c->db,c->argv[2]);
     }
+    // 插入进去
     dbAdd(c->db,c->argv[2],o);
+    // 设置新的名字的过期时间
     if (expire != -1) setExpire(c,c->db,c->argv[2],expire);
+    // 删除原来的名字对应的键
     dbDelete(c->db,c->argv[1]);
+    // 调用名字修改的hook函数
     signalModifiedKey(c,c->db,c->argv[1]);
     signalModifiedKey(c,c->db,c->argv[2]);
+    // 发生键空间修改的事件
     notifyKeyspaceEvent(NOTIFY_GENERIC,"rename_from",
         c->argv[1],c->db->id);
     notifyKeyspaceEvent(NOTIFY_GENERIC,"rename_to",
@@ -1198,10 +1221,11 @@ void renameGenericCommand(client *c, int nx) {
     addReply(c,nx ? shared.cone : shared.ok);
 }
 
+// rename命令
 void renameCommand(client *c) {
     renameGenericCommand(c,0);
 }
-
+// renamenx命令
 void renamenxCommand(client *c) {
     renameGenericCommand(c,1);
 }
@@ -1557,10 +1581,11 @@ void swapdbCommand(client *c) {
 /*-----------------------------------------------------------------------------
  * Expires API
  *----------------------------------------------------------------------------*/
-
+// 从expires字典中删除实现
 int removeExpire(redisDb *db, robj *key) {
     /* An expire may only be removed if there is a corresponding entry in the
      * main dict. Otherwise, the key will never be freed. */
+    // 只有在主dict中有相应的条目时，才能删除expire。否则，密钥将永远不会被释放。
     serverAssertWithInfo(NULL,key,dictFind(db->dict,key->ptr) != NULL);
     return dictDelete(db->expires,key->ptr) == DICT_OK;
 }

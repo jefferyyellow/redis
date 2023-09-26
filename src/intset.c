@@ -192,7 +192,7 @@ static uint8_t intsetSearch(intset *is, int64_t value, uint32_t *pos) {
 // 插入给定的整数，升级整数集合到一个更大的编码
 // 为啥不需要找到合适的位置呢？你想，因为这个值都引起编码变化了，
 // 要么就是一个很大的值，要么就是一个很小的值，所以要么在最前面，要么在最后面。
-static intset *intsetUpgradeAndAddintsetUpgradeAndAdd(intset *is, int64_t value) {
+static intset *intsetUpgradeAndAdd(intset *is, int64_t value) {
     // 当前的编码
     uint8_t curenc = intrev32ifbe(is->encoding);
     // 给定值需要的编码
