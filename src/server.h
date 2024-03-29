@@ -2002,6 +2002,7 @@ struct redisServer {
     /* Replication (slave) */
     char *masteruser;               /* AUTH with this user and masterauth with master */
     sds masterauth;                 /* AUTH with this password with master */
+    // 主机名
     char *masterhost;               /* Hostname of master */
     int masterport;                 /* Port of master */
     int repl_timeout;               /* Timeout after N seconds of master idle */
@@ -2017,6 +2018,7 @@ struct redisServer {
     char *repl_transfer_tmpfile; /* Slave-> master SYNC temp file name */
     time_t repl_transfer_lastio; /* Unix time of the latest read, for timeout */
     int repl_serve_stale_data; /* Serve stale data when link is down? */
+    // 从服务器是否为只读
     int repl_slave_ro;          /* Slave is read only? */
     int repl_slave_ignore_maxmemory;    /* If true slaves do not evict. */
     time_t repl_down_since; /* Unix time at which link with master went down */
@@ -3399,10 +3401,14 @@ robj *objectCommandLookupOrReply(client *c, robj *key, robj *reply);
 int objectSetLRUOrLFU(robj *val, long long lfu_freq, long long lru_idle,
                        long long lru_clock, int lru_multiplier);
 #define LOOKUP_NONE 0
-#define LOOKUP_NOTOUCH (1<<0)  /* Don't update LRU. */
+#define LOOKUP_NOTOUCH (1<<0)  /* Don't update LRU.  不改变键的上次访问时间*/
+// 不要在键未命中时触发键事件
 #define LOOKUP_NONOTIFY (1<<1) /* Don't trigger keyspace event on key misses. */
+// 不更新键命中/未命中计数器
 #define LOOKUP_NOSTATS (1<<2)  /* Don't update keyspace hits/misses counters. */
+// 即使在从服务器中也删除过期的密钥
 #define LOOKUP_WRITE (1<<3)    /* Delete expired keys even in replicas. */
+// 避免删除惰性过期密钥
 #define LOOKUP_NOEXPIRE (1<<4) /* Avoid deleting lazy expired keys. */
 
 void dbAdd(redisDb *db, robj *key, robj *val);

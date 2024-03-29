@@ -42,7 +42,9 @@
  *----------------------------------------------------------------------------*/
 
 /* Flags for expireIfNeeded */
+// 删除过期键
 #define EXPIRE_FORCE_DELETE_EXPIRED 1
+// 避免删除过期键
 #define EXPIRE_AVOID_DELETE_EXPIRED 2
 
 int expireIfNeeded(redisDb *db, robj *key, int flags);
@@ -89,9 +91,11 @@ void updateLFU(robj *val) {
  * in the replication link. */
 // 在指定的DB中为读取操作查找一个键，如果键不存在就返回NULL
 robj *lookupKey(redisDb *db, robj *key, int flags) {
+    // 找到字典项
     dictEntry *de = dictFind(db->dict,key->ptr);
     robj *val = NULL;
     if (de) {
+        // 得到字典项的值
         val = dictGetVal(de);
         /* Forcing deletion of expired keys on a replica makes the replica
          * inconsistent with the master. We forbid it on readonly replicas, but
@@ -103,32 +107,39 @@ robj *lookupKey(redisDb *db, robj *key, int flags) {
          * perform additional writes. */
         int is_ro_replica = server.masterhost && server.repl_slave_ro;
         int expire_flags = 0;
+        // 删除过期键
         if (flags & LOOKUP_WRITE && !is_ro_replica)
             expire_flags |= EXPIRE_FORCE_DELETE_EXPIRED;
         if (flags & LOOKUP_NOEXPIRE)
             expire_flags |= EXPIRE_AVOID_DELETE_EXPIRED;
+        // 如果需要删除过期事情
         if (expireIfNeeded(db, key, expire_flags)) {
             /* The key is no longer valid. */
             val = NULL;
         }
     }
-
+    // 找到键对应的值了
     if (val) {
         /* Update the access time for the ageing algorithm.
          * Don't do it if we have a saving child, as this will trigger
          * a copy on write madness. */
+        // 没有存储子进程并且没有说不能更改访问的键
         if (!hasActiveChildProcess() && !(flags & LOOKUP_NOTOUCH)){
+            // 更新访问时间
             if (server.maxmemory_policy & MAXMEMORY_FLAG_LFU) {
                 updateLFU(val);
             } else {
                 val->lru = LRU_CLOCK();
             }
         }
-
+        // 需要更新键命中的计数
         if (!(flags & (LOOKUP_NOSTATS | LOOKUP_WRITE)))
             server.stat_keyspace_hits++;
         /* TODO: Use separate hits stats for WRITE */
-    } else {
+    } 
+    // 没找到
+    else {
+        // 需要触发没命中的事件
         if (!(flags & (LOOKUP_NONOTIFY | LOOKUP_WRITE)))
             notifyKeyspaceEvent(NOTIFY_KEY_MISS, "keymiss", key, db->id);
         if (!(flags & (LOOKUP_NOSTATS | LOOKUP_WRITE)))

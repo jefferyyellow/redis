@@ -44,15 +44,20 @@
 #define DICT_OK 0
 #define DICT_ERR 1
 
+// 字典原始
 typedef struct dictEntry {
+    // 键
     void *key;
+    // 值
     union {
         void *val;
         uint64_t u64;
         int64_t s64;
         double d;
     } v;
+    // 同一个哈希桶位的下一个元素
     struct dictEntry *next;     /* Next entry in the same hash bucket. */
+    // 任意数量的字节（从指针对齐的地址开始），其大小由dictType的dictEntryMetadataBytes()返回
     void *metadata[];           /* An arbitrary number of bytes (starting at a
                                  * pointer-aligned address) of size as returned
                                  * by dictType's dictEntryMetadataBytes(). */
@@ -70,22 +75,29 @@ typedef struct dictType {
     int (*expandAllowed)(size_t moreMem, double usedRatio);
     /* Allow a dictEntry to carry extra caller-defined metadata.  The
      * extra memory is initialized to 0 when a dictEntry is allocated. */
+    // 允许一个字典元素携带额外的调用者定义的元数据。当字段元素分配时额外内存初始化为0
     size_t (*dictEntryMetadataBytes)(dict *d);
 } dictType;
 
+// 大小和掩码
 #define DICTHT_SIZE(exp) ((exp) == -1 ? 0 : (unsigned long)1<<(exp))
 #define DICTHT_SIZE_MASK(exp) ((exp) == -1 ? 0 : (DICTHT_SIZE(exp))-1)
 
 struct dict {
+    // 该字典对应的特定操作函数
     dictType *type;
-
+    // Hash表
     dictEntry **ht_table[2];
+    
     unsigned long ht_used[2];
-
+    // 如果不在重新哈希过程中为-1，否则表示rehash到哪个元素了，记录该元素的下标值。
     long rehashidx; /* rehashing not in progress if rehashidx == -1 */
 
     /* Keep small vars at end for optimal (minimal) struct padding */
+    // 将小变量留在末尾以优化结构填充
+    // 大于0表示重新哈希暂停
     int16_t pauserehash; /* If >0 rehashing is paused (<0 indicates coding error) */
+    // 大小的指数
     signed char ht_size_exp[2]; /* exponent of size. (size = 1<<exp) */
 };
 
@@ -93,6 +105,8 @@ struct dict {
  * dictAdd, dictFind, and other functions against the dictionary even while
  * iterating. Otherwise it is a non safe iterator, and only dictNext()
  * should be called while iterating. */
+// 如果safe设置为1，这是一个安全迭代器，这意味着，即使在迭代时，您也可以针对字典调用dictAdd、dictFind和其他函数。 
+// 否则它是一个不安全的迭代器，迭代时只应调用dictNext() 。
 typedef struct dictIterator {
     dict *d;
     long index;
@@ -110,6 +124,7 @@ typedef void (dictScanBucketFunction)(dict *d, dictEntry **bucketref);
 #define DICT_HT_INITIAL_SIZE     (1<<(DICT_HT_INITIAL_EXP))
 
 /* ------------------------------- Macros ------------------------------------*/
+// 释放一个元素的值
 #define dictFreeVal(d, entry) do {                     \
     if ((d)->type->valDestructor)                      \
         (d)->type->valDestructor((d), (entry)->v.val); \
@@ -131,6 +146,7 @@ typedef void (dictScanBucketFunction)(dict *d, dictEntry **bucketref);
 #define dictSetDoubleVal(entry, _val_) \
     do { (entry)->v.d = _val_; } while(0)
 
+// 释放一个元素的键
 #define dictFreeKey(d, entry) \
     if ((d)->type->keyDestructor) \
         (d)->type->keyDestructor((d), (entry)->key)
@@ -142,6 +158,7 @@ typedef void (dictScanBucketFunction)(dict *d, dictEntry **bucketref);
         (entry)->key = (_key_); \
 } while(0)
 
+// 比较键
 #define dictCompareKeys(d, key1, key2) \
     (((d)->type->keyCompare) ? \
         (d)->type->keyCompare((d), key1, key2) : \
@@ -157,10 +174,14 @@ typedef void (dictScanBucketFunction)(dict *d, dictEntry **bucketref);
 #define dictGetSignedIntegerVal(he) ((he)->v.s64)
 #define dictGetUnsignedIntegerVal(he) ((he)->v.u64)
 #define dictGetDoubleVal(he) ((he)->v.d)
+// 两个Hash表的总长度
 #define dictSlots(d) (DICTHT_SIZE((d)->ht_size_exp[0])+DICTHT_SIZE((d)->ht_size_exp[1]))
 #define dictSize(d) ((d)->ht_used[0]+(d)->ht_used[1])
+// 字典正在重新哈希
 #define dictIsRehashing(d) ((d)->rehashidx != -1)
+// 正在暂停哈希
 #define dictPauseRehashing(d) ((d)->pauserehash++)
+// 正在重新哈希
 #define dictResumeRehashing(d) ((d)->pauserehash--)
 
 /* If our unsigned long type can store a 64 bit number, use a 64 bit PRNG. */
@@ -171,24 +192,34 @@ typedef void (dictScanBucketFunction)(dict *d, dictEntry **bucketref);
 #endif
 
 /* API */
+// 创建指定类型的字典
 dict *dictCreate(dictType *type);
+// 将字典扩展到指定大小，如果不成功返回DICT_ERR
 int dictExpand(dict *d, unsigned long size);
+// 尝试将字典扩展到指定大小
 int dictTryExpand(dict *d, unsigned long size);
+// 字典中增加一个元素
 int dictAdd(dict *d, void *key, void *val);
+// 低级的增加或者查找函数,就是如果没有就增加，如果有就返回
 dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing);
+// 增加或者查找，就是如果没有就增加，如果有就返回
 dictEntry *dictAddOrFind(dict *d, void *key);
+// 增加或者替代,没有就增加，有就重新赋值
 int dictReplace(dict *d, void *key, void *val);
 int dictDelete(dict *d, const void *key);
 dictEntry *dictUnlink(dict *d, const void *key);
 void dictFreeUnlinkedEntry(dict *d, dictEntry *he);
 dictEntry *dictTwoPhaseUnlinkFind(dict *d, const void *key, dictEntry ***plink, int *table_index);
 void dictTwoPhaseUnlinkFree(dict *d, dictEntry *he, dictEntry **plink, int table_index);
+// 清空然后释放字典
 void dictRelease(dict *d);
 dictEntry * dictFind(dict *d, const void *key);
 void *dictFetchValue(dict *d, const void *key);
 int dictResize(dict *d);
+// 得到一个迭代器
 dictIterator *dictGetIterator(dict *d);
 dictIterator *dictGetSafeIterator(dict *d);
+// 初始化字典的迭代器
 void dictInitIterator(dictIterator *iter, dict *d);
 void dictInitSafeIterator(dictIterator *iter, dict *d);
 void dictResetIterator(dictIterator *iter);
@@ -203,7 +234,9 @@ uint64_t dictGenCaseHashFunction(const unsigned char *buf, size_t len);
 void dictEmpty(dict *d, void(callback)(dict*));
 void dictEnableResize(void);
 void dictDisableResize(void);
+// 执行n步增量重新哈希
 int dictRehash(dict *d, int n);
+// 重新hash，执行指定毫秒就返回，等待下一次执行
 int dictRehashMilliseconds(dict *d, int ms);
 void dictSetHashFunctionSeed(uint8_t *seed);
 uint8_t *dictGetHashFunctionSeed(void);
