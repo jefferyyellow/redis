@@ -3775,6 +3775,7 @@ void redactClientCommandArgument(client *c, int argc) {
 /* Rewrite the command vector of the client. All the new objects ref count
  * is incremented. The old command vector is freed, and the old objects
  * ref count is decremented. */
+// 重写客户端的命令向量。 所有新对象的引用计数都会增加。 旧的命令向量被释放，旧的对象引用计数被减少
 void rewriteClientCommandVector(client *c, int argc, ...) {
     va_list ap;
     int j;
@@ -3789,11 +3790,13 @@ void rewriteClientCommandVector(client *c, int argc, ...) {
         argv[j] = a;
         incrRefCount(a);
     }
+    // 用提供的命令向量完全替换客户端命令向量
     replaceClientCommandVector(c, argc, argv);
     va_end(ap);
 }
 
 /* Completely replace the client command vector with the provided one. */
+// 用提供的命令向量完全替换客户端命令向量。
 void replaceClientCommandVector(client *c, int argc, robj **argv) {
     int j;
     retainOriginalCommandVector(c);

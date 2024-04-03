@@ -225,24 +225,31 @@ int clientTotalPubSubSubscriptionCount(client *c) {
 
 /* Subscribe a client to a channel. Returns 1 if the operation succeeded, or
  * 0 if the client was already subscribed to that channel. */
+// 为客户端订阅频道。 如果操作成功则返回1，如果客户端已订阅该频道则返回0
 int pubsubSubscribeChannel(client *c, robj *channel, pubsubtype type) {
     dictEntry *de;
     list *clients = NULL;
     int retval = 0;
 
     /* Add the channel to the client -> channels hash table */
+    // 增加一个频道到【客户端 -> 频道】哈希表
     if (dictAdd(type.clientPubSubChannels(c),channel,NULL) == DICT_OK) {
         retval = 1;
         incrRefCount(channel);
         /* Add the client to the channel -> list of clients hash table */
+        // 查找频道
         de = dictFind(*type.serverPubSubChannels, channel);
+        // 如果没有
         if (de == NULL) {
+            // 创建一个客户端列表
             clients = listCreate();
+            // 添加到频道列表
             dictAdd(*type.serverPubSubChannels, channel, clients);
             incrRefCount(channel);
         } else {
             clients = dictGetVal(de);
         }
+        // 将客户端加入到客户端列表中
         listAddNodeTail(clients,c);
     }
     /* Notify the client */
@@ -252,6 +259,7 @@ int pubsubSubscribeChannel(client *c, robj *channel, pubsubtype type) {
 
 /* Unsubscribe a client from a channel. Returns 1 if the operation succeeded, or
  * 0 if the client was not subscribed to the specified channel. */
+// 取消客户端对频道的订阅。 如果操作成功则返回1，如果客户端没有订阅指定频道则返回0
 int pubsubUnsubscribeChannel(client *c, robj *channel, int notify, pubsubtype type) {
     dictEntry *de;
     list *clients;
@@ -261,19 +269,26 @@ int pubsubUnsubscribeChannel(client *c, robj *channel, int notify, pubsubtype ty
     /* Remove the channel from the client -> channels hash table */
     incrRefCount(channel); /* channel may be just a pointer to the same object
                             we have in the hash tables. Protect it... */
+    // 从客户端的发布订阅字典中删除
     if (dictDelete(type.clientPubSubChannels(c),channel) == DICT_OK) {
         retval = 1;
         /* Remove the client from the channel -> clients list hash table */
+        // 找到订阅频道的客户端列表
         de = dictFind(*type.serverPubSubChannels, channel);
         serverAssertWithInfo(c,NULL,de != NULL);
+        // 得到客户端列表
         clients = dictGetVal(de);
+        // 得到客户端在列表中的节点
         ln = listSearchKey(clients,c);
         serverAssertWithInfo(c,NULL,ln != NULL);
+        // 删除客户端节点
         listDelNode(clients,ln);
+        // 如果客户端列表为0，表示该频道没有人订阅了
         if (listLength(clients) == 0) {
             /* Free the list and associated hash entry at all if this was
              * the latest client, so that it will be possible to abuse
              * Redis PUBSUB creating millions of channels. */
+            // 将频道也删除了
             dictDelete(*type.serverPubSubChannels, channel);
             /* As this channel isn't subscribed by anyone, it's safe
              * to remove the channel from the slot. */
@@ -446,6 +461,7 @@ int pubsubUnsubscribeAllPatterns(client *c, int notify) {
 
 /*
  * Publish a message to all the subscribers.
+ * 发布一个消息到所有的订阅者
  */
 int pubsubPublishMessageInternal(robj *channel, robj *message, pubsubtype type) {
     int receivers = 0;
@@ -455,15 +471,19 @@ int pubsubPublishMessageInternal(robj *channel, robj *message, pubsubtype type) 
     listIter li;
 
     /* Send to clients listening for that channel */
+    // 找到频道对应的字典元素
     de = dictFind(*type.serverPubSubChannels, channel);
     if (de) {
+        // 得到的是一个订阅该频道的客户端列表
         list *list = dictGetVal(de);
         listNode *ln;
         listIter li;
-
+        // 创建从头开始的迭代器
         listRewind(list,&li);
+        // 遍历列表
         while ((ln = listNext(&li)) != NULL) {
             client *c = ln->value;
+            // 发送发布订阅消息
             addReplyPubsubMessage(c,channel,message,*type.messageBulk);
             updateClientMemUsageAndBucket(c);
             receivers++;
@@ -476,20 +496,24 @@ int pubsubPublishMessageInternal(robj *channel, robj *message, pubsubtype type) 
     }
 
     /* Send to clients listening to matching channels */
+    // 遍历所有订阅模式的字典元素
     di = dictGetIterator(server.pubsub_patterns);
     if (di) {
         channel = getDecodedObject(channel);
+        // 遍历所有的元素
         while((de = dictNext(di)) != NULL) {
             robj *pattern = dictGetKey(de);
             list *clients = dictGetVal(de);
+            // 是否匹配
             if (!stringmatchlen((char*)pattern->ptr,
                                 sdslen(pattern->ptr),
                                 (char*)channel->ptr,
                                 sdslen(channel->ptr),0)) continue;
-
+            // 遍历模式相应的客户端
             listRewind(clients,&li);
             while ((ln = listNext(&li)) != NULL) {
                 client *c = listNodeValue(ln);
+                // 发送发布订阅消息
                 addReplyPubsubPatMessage(c,pattern,channel,message);
                 updateClientMemUsageAndBucket(c);
                 receivers++;
@@ -502,6 +526,7 @@ int pubsubPublishMessageInternal(robj *channel, robj *message, pubsubtype type) 
 }
 
 /* Publish a message to all the subscribers. */
+// 发布一个消息到所有的订阅者
 int pubsubPublishMessage(robj *channel, robj *message, int sharded) {
     return pubsubPublishMessageInternal(channel, message, sharded? pubSubShardType : pubSubType);
 }
@@ -510,32 +535,38 @@ int pubsubPublishMessage(robj *channel, robj *message, int sharded) {
  * Pubsub commands implementation
  *----------------------------------------------------------------------------*/
 
-/* SUBSCRIBE channel [channel ...] */
+/* 格式：SUBSCRIBE channel [channel ...] */
+// 订阅命令（subscribe）的作用是订阅指定的渠道
 void subscribeCommand(client *c) {
     int j;
+    // 指示客户端不应被阻塞并且不在事务当中
     if ((c->flags & CLIENT_DENY_BLOCKING) && !(c->flags & CLIENT_MULTI)) {
         /**
          * A client that has CLIENT_DENY_BLOCKING flag on
          * expect a reply per command and so can not execute subscribe.
-         *
+         * 具有CLIENT_DENY_BLOCKING标志的客户端期望每个命令都有回复，因此无法执行订阅。
          * Notice that we have a special treatment for multi because of
          * backward compatibility
          */
         addReplyError(c, "SUBSCRIBE isn't allowed for a DENY BLOCKING client");
         return;
     }
+    // 遍历订阅频道
     for (j = 1; j < c->argc; j++)
         pubsubSubscribeChannel(c,c->argv[j],pubSubType);
+    // 客户端进入发布订阅模式
     c->flags |= CLIENT_PUBSUB;
 }
 
-/* UNSUBSCRIBE [channel ...] */
+/* 格式：UNSUBSCRIBE [channel ...] */
+// 取消订阅命令（unsubscribe）的作用是取消订阅某个渠道，如果不指定，则该客户端所有的订阅都会取消。
 void unsubscribeCommand(client *c) {
+    // 没有指定，取消所有频道
     if (c->argc == 1) {
         pubsubUnsubscribeAllChannels(c,1);
     } else {
         int j;
-
+        // 遍历取消订阅的频道
         for (j = 1; j < c->argc; j++)
             pubsubUnsubscribeChannel(c,c->argv[j],1,pubSubType);
     }

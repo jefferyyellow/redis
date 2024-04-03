@@ -401,6 +401,7 @@ extern int configOOMScoreAdjValuesDefaults[CONFIG_OOM_COUNT];
 #define CLIENT_PROTOCOL_ERROR (1ULL<<39) /* Protocol error chatting with it. */
 #define CLIENT_CLOSE_AFTER_COMMAND (1ULL<<40) /* Close after executing commands
                                                * and writing entire reply. */
+// 指示客户端不应被阻塞。 目前，在 MULTI、Lua、RM_Call和AOF客户端内开启
 #define CLIENT_DENY_BLOCKING (1ULL<<41) /* Indicate that the client should not be blocked.
                                            currently, turned on inside MULTI, Lua, RM_Call,
                                            and AOF client */
@@ -583,9 +584,9 @@ typedef enum {
 #define MAXMEMORY_ALLKEYS_RANDOM ((6<<8)|MAXMEMORY_FLAG_ALLKEYS)
 #define MAXMEMORY_NO_EVICTION (7<<8)
 
-/* Units */
-#define UNIT_SECONDS 0
-#define UNIT_MILLISECONDS 1
+/* Units 时间单位*/
+#define UNIT_SECONDS 0          // 秒
+#define UNIT_MILLISECONDS 1     // 毫秒
 
 /* SHUTDOWN flags */
 #define SHUTDOWN_NOFLAGS 0      /* No flags. */
@@ -2051,6 +2052,7 @@ struct redisServer {
     int maxmemory_eviction_tenacity;/* Aggressiveness of eviction processing */
     int lfu_log_factor;             /* LFU logarithmic counter factor. */
     int lfu_decay_time;             /* LFU counter decay factor. */
+    // 它用于定义Redis协议中单个bulk数据（如字符串、哈希、列表等序列化后的二进制数据）的最大长度。当客户端发送请求时，如果bulk数据的大小超过这个限制，Redis会拒绝接收。
     long long proto_max_bulk_len;   /* Protocol bulk length maximum size. */
     int oom_score_adj_values[CONFIG_OOM_COUNT];   /* Linux oom_score_adj configuration */
     int oom_score_adj;                            /* If true, oom_score_adj is managed */

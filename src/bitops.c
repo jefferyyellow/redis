@@ -37,6 +37,50 @@
 /* Count number of bits set in the binary array pointed by 's' and long
  * 'count' bytes. The implementation of this function is required to
  * work with an input string length up to 512 MB or more (server.proto_max_bulk_len) */
+// variable-precision swar算法计算输入字符串中位为1的个数
+// 整体的思路就是分治法
+/*
+步骤1:
+这一步用到0x55555555作为掩码，其二进制表示为01010101010101010101010101010101
+此时i可理解为长度为32的数组，每个元素取值区间[0,1]，元素宽度1bit。
+
+通过i & 0x55555555运算，取得了i的奇数位置元素，存储为16个2bit整数；
+通过(i>>1) & 0x55555555运算，取得了i的偶数位置元素，存储为16个2bit整数；
+
+两者相加，相当于16组2bit整数按位相加，问题就转化成了2bit的二进制加法。
+由于原数组每个元素取值区间[0,1]，所以每组相加的结果会在[0,2]区间内，2bit刚好存储。
+最终得到长度为16的数组，每个元素取值区间[0,2]。
+
+步骤2:
+这一步用到0x33333333作为掩码，其二进制表示为00110011001100110011001100110011
+此时i可理解表示为长度为16的数组，每个元素取值区间[0,2]，元素宽度2bit。
+
+通过i & 0x33333333运算，取得了i的奇数位置元素，存储为8个4bit整数；
+通过(i>>1) & 0x33333333运算，取得了i的偶数位置元素，存储为8个4bit整数；
+
+两者相加，相当于8组4bit整数按位相加，问题就转化成了4bit的二进制加法。
+由于原数组每个元素取值区间[0,2]，所以每组相加的结果会在[0,4]区间内，4bit刚好存储。
+最终得到长度为8的数组，每个元素取值区间[0,4]。
+
+步骤3:
+这一步用到0x0F0F0F0F作为掩码，其二进制表示为00001111000011110000111100001111
+此时i可理解表示为长度为8的数组，每个元素取值区间[0,4]，元素宽度4bit。
+
+通过i & 0x0F0F0F0F运算，取得了i的奇数位置元素，存储为4个8bit整数；
+通过(i>>1) & 0x33333333运算，取得了i的偶数位置元素，存储为4个8bit整数；
+
+两者相加，相当于4组8bit整数按位相加, 问题就转化成了8bit的二进制加法。
+由于原数组每个元素取值区间[0,4]，所以每组相加的结果会在[0,8]区间内，8bit足够存储。
+最终得到长度为4的数组，每个元素取值区间[0,8]。
+
+步骤4:
+按照上面的思路，本来应该继续将长度为4的数组转换为长度为2的数组。
+但是这里由于4个8bit整数相加存在简便运算，就不继续往下合并了。
+
+到这一步是时i=0x02030404，为了求出最终结果，我们可以想到位移的办法将每8bit取出（参考ip掩码计算），然后再依次相加。
+最终结果也就是 (i & 0xFF) + ((i>>8) & 0xFF) + ((i>>16) & 0xFF) + ((i>>24) & 0xFF)
+这个对应了i = (i * 0x01010101) >> 24;
+*/
 long long redisPopcount(void *s, long count) {
     long long bits = 0;
     unsigned char *p = s;
@@ -77,6 +121,17 @@ long long redisPopcount(void *s, long count) {
         aux6 = (aux6 & 0x33333333) + ((aux6 >> 2) & 0x33333333);
         aux7 = aux7 - ((aux7 >> 1) & 0x55555555);
         aux7 = (aux7 & 0x33333333) + ((aux7 >> 2) & 0x33333333);
+        /* 将0x01010101转化成多项式表达
+        0x01010101 == 2*24 + 2*16 + 2*8 + 2*0 
+        两边同乘以i
+        i * 0x01010101 == i * 2*24 + i * 2*16 + i * 2*8 + i * 2*0
+        2的乘方运算转化为位移运算
+        i * 0x01010101 == (i<<24) + (i<<16) + (i<<8) + (i<<0)
+        两边同时右移24位
+        (i * 0x01010101)>>24 == ((i<<24)>>24) + ((i<<16)>>24) + ((i<<8)>>24) + ((i<<0)>>24)
+        将左移和右移合并，并考虑溢出，最终结果一致
+        (i * 0x01010101)>>24 == (i & 0xFF) + ((i>>8) & 0xFF) + ((i>>16) & 0xFF) + ((i>>24) & 0xFF)
+        */
         bits += ((((aux1 + (aux1 >> 4)) & 0x0F0F0F0F) +
                     ((aux2 + (aux2 >> 4)) & 0x0F0F0F0F) +
                     ((aux3 + (aux3 >> 4)) & 0x0F0F0F0F) +
@@ -477,18 +532,25 @@ int getBitfieldTypeFromArgument(client *c, robj *o, int *sign, int *bits) {
  * bits to a string object. The command creates or pad with zeroes the string
  * so that the 'maxbit' bit can be addressed. The object is finally
  * returned. Otherwise if the key holds a wrong type NULL is returned and
- * an error is sent to the client. */
+ * an error is sent to the client. 
+ * 这是一个辅助函数，用于需要将位写入字符串对象的命令实现。 该命令创建字符串或将其填充为零，
+ * 以便可以寻址“maxbit”位。 对象最终被返回。 否则，如果键包含错误类型，则返回NULL并向客户端发送错误。
+ * */
 robj *lookupStringForBitCommand(client *c, uint64_t maxbit, int *dirty) {
     size_t byte = maxbit >> 3;
+    // 获取字符串对象
     robj *o = lookupKeyWrite(c->db,c->argv[1]);
     if (checkType(c,o,OBJ_STRING)) return NULL;
     if (dirty) *dirty = 0;
-
+    // 没找到，就往数据库中增加键值对
     if (o == NULL) {
         o = createObject(OBJ_STRING,sdsnewlen(NULL, byte+1));
         dbAdd(c->db,c->argv[1],o);
         if (dirty) *dirty = 1;
-    } else {
+    }
+    //  
+    else {
+        // 如果是共享对象或静态字符串，则需要复制一份
         o = dbUnshareStringValue(c->db,c->argv[1],o);
         size_t oldlen = sdslen(o->ptr);
         o->ptr = sdsgrowzero(o->ptr,byte+1);
@@ -529,6 +591,8 @@ unsigned char *getObjectReadOnlyString(robj *o, long *len, char *llbuf) {
 }
 
 /* SETBIT key offset bitvalue */
+// setbit命令对key所存储的字符串值，设置指定偏移量上的比特位。
+// setbit　key　offset　value
 void setbitCommand(client *c) {
     robj *o;
     char *err = "bit is not an integer or out of range";
@@ -536,35 +600,45 @@ void setbitCommand(client *c) {
     ssize_t byte, bit;
     int byteval, bitval;
     long on;
-
+    // 获取位偏移参数
     if (getBitOffsetFromArgument(c,c->argv[2],&bitoffset,0,0) != C_OK)
         return;
 
+    // 打开还是关闭的参数
     if (getLongFromObjectOrReply(c,c->argv[3],&on,err) != C_OK)
         return;
 
     /* Bits can only be set or cleared... */
+    // on只能是最低位为0或者1，其他的位不能为1
     if (on & ~1) {
         addReplyError(c,err);
         return;
     }
 
+    // 找到或者插入键对应的对象
     int dirty;
     if ((o = lookupStringForBitCommand(c,bitoffset,&dirty)) == NULL) return;
 
     /* Get current values */
+    // 一个字节是8位，现在需要除以8，以定位到第byte个字节上
     byte = bitoffset >> 3;
     byteval = ((uint8_t*)o->ptr)[byte];
+    // 取得从低位算的offset位
     bit = 7 - (bitoffset & 0x7);
+    // 计算最终的值
     bitval = byteval & (1 << bit);
 
     /* Either it is newly created, changed length, or the bit changes before and after.
      * Note that the bitval here is actually a decimal number.
      * So we need to use `!!` to convert it to 0 or 1 for comparison. */
+    // 如果是脏的，或者值改变
     if (dirty || (!!bitval != on)) {
         /* Update byte with new bit value. */
+        // 想将指定位清空
         byteval &= ~(1 << bit);
+        // 根据on的值，对指定位置位
         byteval |= ((on & 0x1) << bit);
+        // 设置新的值
         ((uint8_t*)o->ptr)[byte] = byteval;
         signalModifiedKey(c,c->db,c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_STRING,"setbit",c->argv[1],c->db->id);
@@ -575,7 +649,8 @@ void setbitCommand(client *c) {
     addReply(c, bitval ? shared.cone : shared.czero);
 }
 
-/* GETBIT key offset */
+/* 格式：GETBIT key offset */
+// getbit命令对key所存储的字符串，获取指定偏移量上的比特位
 void getbitCommand(client *c) {
     robj *o;
     char llbuf[32];
@@ -583,18 +658,25 @@ void getbitCommand(client *c) {
     size_t byte, bit;
     size_t bitval = 0;
 
+    // 获取位偏移参数
     if (getBitOffsetFromArgument(c,c->argv[2],&bitoffset,0,0) != C_OK)
         return;
 
+    // 根据键获得对应的元素
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.czero)) == NULL ||
         checkType(c,o,OBJ_STRING)) return;
-
+    
+    // 一个字节是8位，现在需要除以8，以定位到第byte个字节上
     byte = bitoffset >> 3;
+    // 取得从低位算的offset位
     bit = 7 - (bitoffset & 0x7);
+    // 如果是OBJ_ENCODING_RAW或者OBJ_ENCODING_EMBSTR编码
     if (sdsEncodedObject(o)) {
+        // 不然偏移值小于字符串长度
         if (byte < sdslen(o->ptr))
             bitval = ((uint8_t*)o->ptr)[byte] & (1 << bit);
     } else {
+        // 如果偏移值小于整数转换成字符串的长度
         if (byte < (size_t)ll2string(llbuf,sizeof(llbuf),(long)o->ptr))
             bitval = llbuf[byte] & (1 << bit);
     }
@@ -873,7 +955,9 @@ void bitcountCommand(client *c) {
     }
 }
 
-/* BITPOS key bit [start [end [BIT|BYTE]]] */
+/* 格式：BITPOS key bit [start [end [BIT|BYTE]]] */
+// 用户可以通过执行BITPOS命令，在位图中查找第一个被设置为指定值的bit（二进制位,只能是0或者1），并返回这个二进制位的偏移量
+// [BIT|BYTE]：位范围还是字节范围
 void bitposCommand(client *c) {
     robj *o;
     long long start, end;
@@ -881,10 +965,11 @@ void bitposCommand(client *c) {
     unsigned char *p;
     char llbuf[LONG_STR_SIZE];
     int isbit = 0, end_given = 0;
-    unsigned char first_byte_neg_mask = 0, last_byte_neg_mask = 0;
+    unsigned char  first_byte_neg_mask = 0, last_byte_neg_mask = 0;
 
     /* Parse the bit argument to understand what we are looking for, set
      * or clear bits. */
+    // 获得bit的值
     if (getLongFromObjectOrReply(c,c->argv[2],&bit,NULL) != C_OK)
         return;
     if (bit != 0 && bit != 1) {
@@ -895,20 +980,25 @@ void bitposCommand(client *c) {
     /* If the key does not exist, from our point of view it is an infinite
      * array of 0 bits. If the user is looking for the first clear bit return 0,
      * If the user is looking for the first set bit, return -1. */
+    // 找到对应的元素
     if ((o = lookupKeyRead(c->db,c->argv[1])) == NULL) {
         addReplyLongLong(c, bit ? -1 : 0);
         return;
     }
+    // 必须是字符串类型
     if (checkType(c,o,OBJ_STRING)) return;
+    // 获取字符串，如果是整型就转换成字符串
     p = getObjectReadOnlyString(o,&strlen,llbuf);
 
     /* Parse start/end range if any. */
+    // 获取起始位置和结束位置
     if (c->argc == 4 || c->argc == 5 || c->argc == 6) {
         long long totlen = strlen;
         /* Make sure we will not overflow */
         serverAssert(totlen <= LLONG_MAX >> 3);
         if (getLongLongFromObjectOrReply(c,c->argv[3],&start,NULL) != C_OK)
             return;
+        // 分析最后的[BIT|BYTE]
         if (c->argc == 6) {
             if (!strcasecmp(c->argv[5]->ptr,"bit")) isbit = 1;
             else if (!strcasecmp(c->argv[5]->ptr,"byte")) isbit = 0;
@@ -917,30 +1007,43 @@ void bitposCommand(client *c) {
                 return;
             }
         }
+        // 分析end参数
         if (c->argc >= 5) {
             if (getLongLongFromObjectOrReply(c,c->argv[4],&end,NULL) != C_OK)
                 return;
             end_given = 1;
-        } else {
+        } 
+        // 没有end参数
+        else {
+            // 如果是bit，每个字节8位，分别为0-7位，end为最大的索引值
             if (isbit) end = (totlen<<3) + 7;
+            // bits
             else end = totlen-1;
         }
+        // 如果是位，总的位数
         if (isbit) totlen <<= 3;
         /* Convert negative indexes */
+        // 将负数转换成索引
         if (start < 0) start = totlen+start;
         if (end < 0) end = totlen+end;
+        // 将start和end都clap在合理的范围内
         if (start < 0) start = 0;
         if (end < 0) end = 0;
         if (end >= totlen) end = totlen-1;
+        // 如果是位
         if (isbit && start <= end) {
             /* Before converting bit offset to byte offset, create negative masks
              * for the edges. */
+            // 第一个字节和最后一个字节的掩码
             first_byte_neg_mask = ~((1<<(8-(start&7)))-1) & 0xFF;
             last_byte_neg_mask = (1<<(7-(end&7)))-1;
+            // 开始和结束的字节数
             start >>= 3;
             end >>= 3;
         }
-    } else if (c->argc == 3) {
+    } 
+    // 沒有设置开始和结束，就是整个字符串
+    else if (c->argc == 3) {
         /* The whole string. */
         start = 0;
         end = strlen-1;
@@ -952,37 +1055,50 @@ void bitposCommand(client *c) {
 
     /* For empty ranges (start > end) we return -1 as an empty range does
      * not contain a 0 nor a 1. */
+    // 如果起始位置大于结束位置，则返回-1
     if (start > end) {
         addReplyLongLong(c, -1);
     } else {
+        // 总的字节数
         long bytes = end-start+1;
         long long pos;
         unsigned char tmpchar;
+        // 如果掩码设置了值
         if (first_byte_neg_mask) {
+            // 如果是1，tmpchar中取走的那部分字节保存原样，留下的部分清零
             if (bit) tmpchar = p[start] & ~first_byte_neg_mask;
+            // 如果是0，tmpchar中取走的那部分字节保存原样，留下的部分置1，
             else tmpchar = p[start] | first_byte_neg_mask;
             /* Special case, there is only one byte */
+            // 特殊情况，只有一个字节，最后一个字节也同样处理
             if (last_byte_neg_mask && bytes == 1) {
                 if (bit) tmpchar = tmpchar & ~last_byte_neg_mask;
                 else tmpchar = tmpchar | last_byte_neg_mask;
             }
+            // 找到第一个字节的bit位置
             pos = redisBitpos(&tmpchar,1,bit);
             /* If there are no more bytes or we get valid pos, we can exit early */
+            // 如果没有其他的字节，就直接返回结果
             if (bytes == 1 || (pos != -1 && pos != 8)) goto result;
             start++;
             bytes--;
         }
         /* If the last byte has not bits in the range, we should exclude it */
+        // 如果最后一个字节没有在范围内，应该排除它
         long curbytes = bytes - (last_byte_neg_mask ? 1 : 0);
         if (curbytes > 0) {
+            // 从字节流中找到第一个bit的位置
             pos = redisBitpos(p+start,curbytes,bit);
             /* If there is no more bytes or we get valid pos, we can exit early */
             if (bytes == curbytes || (pos != -1 && pos != (long long)curbytes<<3)) goto result;
             start += curbytes;
             bytes -= curbytes;
         }
+        // 如果是1，tmpchar中取走的那部分字节保存原样，留下的部分清零
         if (bit) tmpchar = p[end] & ~last_byte_neg_mask;
+        // 如果是0，tmpchar中取走的那部分字节保存原样，留下的部分置1，
         else tmpchar = p[end] | last_byte_neg_mask;
+        // 从字节流中找到第一个bit的位置
         pos = redisBitpos(&tmpchar,1,bit);
 
     result:

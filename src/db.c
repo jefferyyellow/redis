@@ -405,13 +405,15 @@ int dbDelete(redisDb *db, robj *key) {
 
 /* Prepare the string object stored at 'key' to be modified destructively
  * to implement commands like SETBIT or APPEND.
- *
+ * 准备存储在“key”处的字符串对象，以进行破坏性修改，以实现SETBIT或APPEND等命令
  * An object is usually ready to be modified unless one of the two conditions
  * are true:
- *
+ * 除非满足以下两个条件之一，否则对象通常已准备好进行修改：
  * 1) The object 'o' is shared (refcount > 1), we don't want to affect
  *    other users.
+ *    对象是共享的
  * 2) The object encoding is not "RAW".
+ *    对象编码不是“RAW”
  *
  * If the object is found in one of the above conditions (or both) by the
  * function, an unshared / not-encoded copy of the string object is stored
@@ -430,12 +432,20 @@ int dbDelete(redisDb *db, robj *key) {
  * At this point the caller is ready to modify the object, for example
  * using an sdscat() call to append some data, or anything else.
  */
+// 这个函数的工作原理是检查给定的键值对是否指向共享对象或静态字符串。
+// 如果是，那么它会创建一个新的非共享的副本，以便可以安全地进行修改。
+// 这是一种优化策略，因为在许多情况下，Redis可以通过重用相同的对象来节省内存，
+// 但是当我们需要修改一个值时，我们需要确保我们不会意外地影响到其他地方的引用。
+// 这个函数的名称中的"unshare"意味着它的目的是"取消共享"，即确保我们有一个可以修改的私有副本，而不会影响到其他地方对原始对象的引用。
 robj *dbUnshareStringValue(redisDb *db, robj *key, robj *o) {
     serverAssert(o->type == OBJ_STRING);
     if (o->refcount != 1 || o->encoding != OBJ_ENCODING_RAW) {
         robj *decoded = getDecodedObject(o);
+        // 创建一个新的非共享的副本
         o = createRawStringObject(decoded->ptr, sdslen(decoded->ptr));
+        // 减少原来值的引用计数
         decrRefCount(decoded);
+        // 替换旧的值
         dbReplaceValue(db,key,o);
     }
     return o;
@@ -1605,16 +1615,21 @@ int removeExpire(redisDb *db, robj *key) {
  * of an user calling a command 'c' is the client, otherwise 'c' is set
  * to NULL. The 'when' parameter is the absolute unix time in milliseconds
  * after which the key will no longer be considered valid. */
+// 为指定的键设置过期时间。 如果在调用命令的用户上下文中设置过期，则“c”是客户端，
+// 否则“c”设置为 NULL。 'when'参数是以毫秒为单位的绝对unix时间，在此之后密钥将不再被视为有效。
 void setExpire(client *c, redisDb *db, robj *key, long long when) {
     dictEntry *kde, *de;
 
     /* Reuse the sds from the main dict in the expire dict */
+    // 在过期字典中重用主字典中的sds
     kde = dictFind(db->dict,key->ptr);
     serverAssertWithInfo(NULL,key,kde != NULL);
+    // 插入到过期字典
     de = dictAddOrFind(db->expires,dictGetKey(kde));
     dictSetSignedIntegerVal(de,when);
 
     int writable_slave = server.masterhost && server.repl_slave_ro == 0;
+    // 从节点可写，记录从节点键过期
     if (c && writable_slave && !(c->flags & CLIENT_MASTER))
         rememberSlaveKeyWithExpire(db,key);
 }

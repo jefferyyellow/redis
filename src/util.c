@@ -282,6 +282,7 @@ char *memmapchars(char *s, size_t len, const char *from, const char *to, size_t 
 }
 
 /* Return the number of digits of 'v' when converted to string in radix 10.
+返回'v'转换为基数为10的字符串时的长度。就是数字12345转换成字符串“12345”时，字符串“12345”的长度。
  * See ll2string() for more information. */
 uint32_t digits10(uint64_t v) {
     if (v < 10) return 1;
@@ -512,15 +513,19 @@ int string2ull(const char *s, unsigned long long *value) {
 /* Convert a string into a long. Returns 1 if the string could be parsed into a
  * (non-overflowing) long, 0 otherwise. The value will be set to the parsed
  * value when appropriate. */
+// 将字符串转换为长字符串。 如果字符串可以解析为（非溢出）long，则返回 1，
+// 否则返回 0。 该值将在适当的时候设置为解析后的值。
 int string2l(const char *s, size_t slen, long *lval) {
     long long llval;
-
+    // 先转换为long long int
     if (!string2ll(s,slen,&llval))
         return 0;
 
+    // 如果超出范围返回0
     if (llval < LONG_MIN || llval > LONG_MAX)
         return 0;
 
+    // 或者赋值，然后返回1
     *lval = (long)llval;
     return 1;
 }

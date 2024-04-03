@@ -206,42 +206,66 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing);
 dictEntry *dictAddOrFind(dict *d, void *key);
 // 增加或者替代,没有就增加，有就重新赋值
 int dictReplace(dict *d, void *key, void *val);
+// 删除一个元素
 int dictDelete(dict *d, const void *key);
+// 删除一个元素，并且将元素返回了，并没有释放元素的资源
 dictEntry *dictUnlink(dict *d, const void *key);
+// 调用这个真正释放一个元素
 void dictFreeUnlinkedEntry(dict *d, dictEntry *he);
+// plink里面装的是指向下一个元素的地址，就是上一个元素next的地址
 dictEntry *dictTwoPhaseUnlinkFind(dict *d, const void *key, dictEntry ***plink, int *table_index);
+// 释放元素de, plink里面装的是指向下一个元素的地址，就是上一个元素next的地址
 void dictTwoPhaseUnlinkFree(dict *d, dictEntry *he, dictEntry **plink, int table_index);
 // 清空然后释放字典
 void dictRelease(dict *d);
+// 字典查找，返回对应键的元素
 dictEntry * dictFind(dict *d, const void *key);
+// 获取字典中对应键的值，注意返回值是void*,不是void
 void *dictFetchValue(dict *d, const void *key);
 int dictResize(dict *d);
 // 得到一个迭代器
 dictIterator *dictGetIterator(dict *d);
+// 得到一个迭安全代器
 dictIterator *dictGetSafeIterator(dict *d);
 // 初始化字典的迭代器
 void dictInitIterator(dictIterator *iter, dict *d);
+// 初始化安全迭代器
 void dictInitSafeIterator(dictIterator *iter, dict *d);
+// 重置迭代器
 void dictResetIterator(dictIterator *iter);
+// 遍历下一个元素
 dictEntry *dictNext(dictIterator *iter);
+// 释放迭代器
 void dictReleaseIterator(dictIterator *iter);
+// 从hash表中随机返回一个元素
 dictEntry *dictGetRandomKey(dict *d);
+// 从hash表中随机返回一个元素,这个类似于dictGetRandomKey()，但会做更多工作以确保返回元素的更好分布
 dictEntry *dictGetFairRandomKey(dict *d);
+// 该函数随机对字典随机采样并返回随机位置的几个很少的键
 unsigned int dictGetSomeKeys(dict *d, dictEntry **des, unsigned int count);
 void dictGetStats(char *buf, size_t bufsize, dict *d);
+// 哈希函数
 uint64_t dictGenHashFunction(const void *key, size_t len);
+// 忽略大小写的哈希函数
 uint64_t dictGenCaseHashFunction(const unsigned char *buf, size_t len);
+// 清空字典
 void dictEmpty(dict *d, void(callback)(dict*));
+// 打开可以扩（缩）容的全局设置
 void dictEnableResize(void);
 void dictDisableResize(void);
 // 执行n步增量重新哈希
 int dictRehash(dict *d, int n);
 // 重新hash，执行指定毫秒就返回，等待下一次执行
 int dictRehashMilliseconds(dict *d, int ms);
+// 设置Hash函数种子
 void dictSetHashFunctionSeed(uint8_t *seed);
+// 获得Hash函数种子
 uint8_t *dictGetHashFunctionSeed(void);
+// 函数在Redis源码中的作用是对哈希表（dictionary）进行渐进式遍历。
 unsigned long dictScan(dict *d, unsigned long v, dictScanFunction *fn, dictScanBucketFunction *bucketfn, void *privdata);
+// 得到哈希值,使用类型提供的哈希函数
 uint64_t dictGetHash(dict *d, const void *key);
+// 通过指针和预先计算的哈希值查找dictEntry引用
 dictEntry **dictFindEntryRefByPtrAndHash(dict *d, const void *oldptr, uint64_t hash);
 
 #ifdef REDIS_TEST
